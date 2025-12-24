@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <title>Sistema de Horários Escolares</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <!-- jsPDF + AutoTable para geração de PDFs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
+
+    <!-- XLSX para exportar em Excel -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <!-- Chart.js para gráficos -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="container">
+    <header>
+        <div class="header-inner">
+            <div class="header-text">
+                <h1>Visio Horários Escolares</h1>
+                <p>Organize professores, turmas e turnos em poucos cliques</p>
+            </div>
+            <div class="header-icons">
+                <div class="icon-circle">⏰</div>
+                <div class="icon-circle">📅</div>
+                <div class="icon-circle">📚</div>
+            </div>
+        </div>
+    </header>
+
+    <div id="loginCard" class="card login-card">
+        <h3>Acesso ao Sistema</h3>
+        <form id="formLogin" class="form-grid">
+            <div class="form-group">
+                <label for="loginUsuario">Usuário:</label>
+                <input type="text" id="loginUsuario" autocomplete="username">
+            </div>
+            <div class="form-group">
+                <label for="senhaUsuario">Senha:</label>
+                <input type="password" id="senhaUsuario" autocomplete="current-password">
+            </div>
+            <div class="form-group full-row">
+                <button type="submit" class="btn-primary">Entrar</button>
+            </div>
+        </form>
+        <p class="hint" id="loginHint"></p>
+    </div>
+
+    <div class="main-content">
+        <nav class="sidebar">
+            <button class="menu-btn active" onclick="showSection('professores')">👨‍🏫 Professores</button>
+            <button class="menu-btn" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
+            <button class="menu-btn" onclick="showSection('horarios')">📅 Editor de Horários</button>
+            <button class="menu-btn" onclick="showSection('relatorios')">📄 Relatórios / PDFs</button>
+            <button class="menu-btn" onclick="showSection('consultas')">🔎 Consultas</button>
+            <button class="menu-btn" onclick="sairSistema()">🚪 Sair</button>
+        </nav>
+
+        <main class="content">
+
+            <!-- ================= PROFESSORES ================= -->
+            <section id="professores" class="section active">
+                <h2>Professores</h2>
+
+                <div class="card">
+                    <h3>Cadastrar / Editar Professor</h3>
+                    <form id="formProfessor" class="form-grid">
+                        <input type="hidden" id="professorId">
+                        <div class="form-group">
+                            <label for="nomeProfessor">Nome:</label>
+                            <input type="text" id="nomeProfessor" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="disciplinasProfessor">Disciplinas (separadas por vírgula):</label>
+                            <input type="text" id="disciplinasProfessor" placeholder="Matemática, Física, ...">
+                        </div>
+                        <div class="form-group">
+                            <label for="corProfessor">Cor de identificação:</label>
+                            <input type="color" id="corProfessor" value="#3498db">
+                        </div>
+                        <div class="form-group full-row">
+                            <label>Disponibilidade por dia/turno:</label>
+                            <div id="dispProfessor" class="disp-grid"></div>
+                        </div>
+                        <!-- tempos por dia/turno agora aparecem logo abaixo de cada dia dentro da própria grade -->
+                        <!-- seção de tempos gerais removida; tempos são definidos por dia/turno acima -->
+                        <div class="form-group full-row">
+                            <button type="submit" class="btn-primary">💾 Salvar Professor</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Lista de Professores</h3>
+                    <table class="tabela-padrao">
+                        <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>Disciplinas</th>
+                            <th>Cor</th>
+                            <th>Ações</th>
+                        </tr>
+                        </thead>
+                        <tbody id="listaProfessores"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ================= TURMAS / CURSOS ================= -->
+            <section id="turmas" class="section">
+                <h2>Turmas e Cursos</h2>
+
+                <div class="card">
+                    <h3>Cadastrar / Editar Turma</h3>
+                    <form id="formTurma" class="form-grid">
+                        <input type="hidden" id="turmaId">
+                        <div class="form-group">
+                            <label for="nomeTurma">Nome da Turma:</label>
+                            <input type="text" id="nomeTurma" placeholder="Ex.: INT. INFO. 2025 A" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="cursoTurma">Curso / Área de Atuação:</label>
+                            <div class="inline-group">
+                                <select id="cursoTurma" required></select>
+                                <button type="button" class="btn-secondary small" onclick="abrirModalCurso()" title="Adicionar novo curso">➕</button>
+                                <button type="button" class="btn-danger small" onclick="excluirCursoSelecionado()" title="Excluir curso selecionado">🗑️</button>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <div class="chips-group" id="chips-turno-turma">
+                                <button type="button" class="chip" data-value="MANHA"
+                                        onclick="selecionarChip('chips-turno-turma','turnoTurma',this)">Manhã</button>
+                                <button type="button" class="chip" data-value="TARDE"
+                                        onclick="selecionarChip('chips-turno-turma','turnoTurma',this)">Tarde</button>
+                                <button type="button" class="chip" data-value="NOITE"
+                                        onclick="selecionarChip('chips-turno-turma','turnoTurma',this)">Noite</button>
+                            </div>
+                            <input type="hidden" id="turnoTurma" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="descricaoTurma">Descrição (opcional):</label>
+                            <div class="inline-group">
+                                <input type="text" id="descricaoTurma" placeholder="Ex.: VI Fase • 2025.2" style="flex: 1;">
+                                <button type="submit" class="btn-primary">💾 Salvar Turma</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Turmas Cadastradas</h3>
+                    <table class="tabela-padrao">
+                        <thead>
+                        <tr>
+                            <th>Turma</th>
+                            <th>Curso / Área</th>
+                            <th>Descrição</th>
+                            <th>Turno</th>
+                            <th>Ações</th>
+                        </tr>
+                        </thead>
+                        <tbody id="listaTurmas"></tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- ================= EDITOR DE HORÁRIOS ================= -->
+            <section id="horarios" class="section">
+                <h2>Editor Visual de Horários</h2>
+
+                <div class="card">
+                    <h3>Lançar Aula (Cadastro Rápido)</h3>
+                    <form id="formHorario" class="form-grid">
+                        <input type="hidden" id="horarioId">
+
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <div class="chips-group" id="chips-turno-horario">
+                                <button type="button" class="chip" data-value="MANHA"
+                                        onclick="selecionarChipTurnoHorario(this)">Manhã</button>
+                                <button type="button" class="chip" data-value="TARDE"
+                                        onclick="selecionarChipTurnoHorario(this)">Tarde</button>
+                                <button type="button" class="chip" data-value="NOITE"
+                                        onclick="selecionarChipTurnoHorario(this)">Noite</button>
+                            </div>
+                            <input type="hidden" id="turnoHorario" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Dia da Semana:</label>
+                            <div class="chips-group" id="chips-dia">
+                                <button type="button" class="chip" data-value="SEGUNDA"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Seg</button>
+                                <button type="button" class="chip" data-value="TERCA"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Ter</button>
+                                <button type="button" class="chip" data-value="QUARTA"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Qua</button>
+                                <button type="button" class="chip" data-value="QUINTA"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Qui</button>
+                                <button type="button" class="chip" data-value="SEXTA"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Sex</button>
+                                <button type="button" class="chip" data-value="SABADO"
+                                        onclick="selecionarChip('chips-dia','diaSemana',this)">Sáb</button>
+                            </div>
+                            <input type="hidden" id="diaSemana" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Turma:</label>
+                            <div class="chips-group" id="chips-turma">
+                                <!-- preenchido via JS -->
+                            </div>
+                            <input type="hidden" id="turmaHorario" required>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Horário (tempo):</label>
+                            <div class="chips-group" id="chips-tempo">
+                                <!-- tempos via JS -->
+                            </div>
+                            <input type="hidden" id="tempoHorario" required>
+                            <span class="hint">Selecione <strong>um ou mais tempos</strong> para lançar várias aulas de uma vez.</span>
+                            <div class="inline-group" style="margin-top:6px;">
+                                <button type="button" class="btn-secondary small" onclick="abrirModalTempos()">⚙️ Tempos do turno</button>
+                            </div>
+                        </div>
+
+                        <div class="form-group full-row">
+                            <div class="inline-group" style="align-items: flex-end; width: 100%;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="professorHorario">Professor:</label>
+                                    <select id="professorHorario">
+                                        <option value="">Selecione...</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="disciplinaHorario">Disciplina:</label>
+                                    <input type="text" id="disciplinaHorario" required>
+                                </div>
+                                <div class="form-group" style="flex: 0 0 auto; margin-top: 0;">
+                                    <button type="submit" class="btn-primary">💾 Salvar Aula(s)</button>
+                                </div>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Editor Visual do Turno</h3>
+                    <p id="editorTurnoHint" class="hint editor-turno-hint">
+                        <label class="editor-hint-toggle">
+                            <input type="checkbox" id="chkMostrarInstrucoesEditor">
+                            <span class="editor-hint-icon" aria-hidden="true">💡</span>
+                            <span class="editor-hint-label">Instruções</span>
+                        </label>
+                        <span id="editorTurnoHintText">
+                            Arraste uma aula colorida para outra célula vazia para copiar. Clique nas células para editar ou adicionar. Use 🧠 Ajuste Inteligente e ↩️ Desfazer para reorganizar ou voltar.
+                        </span>
+                    </p>
+
+                    <div class="filtros-grade">
+                        <span>Turno visualizado:</span>
+                        <div class="chips-group" id="chips-turno-visual">
+                            <button type="button" class="chip selecionado" data-value="MANHA"
+                                    onclick="mudarTurnoVisual(this)">Manhã</button>
+                            <button type="button" class="chip" data-value="TARDE"
+                                    onclick="mudarTurnoVisual(this)">Tarde</button>
+                            <button type="button" class="chip" data-value="NOITE"
+                                    onclick="mudarTurnoVisual(this)">Noite</button>
+                        </div>
+                    </div>
+
+                    <div class="editor-actions">
+                        <button type="button" class="btn-primary" onclick="ajusteInteligente()">🧠 Ajuste Inteligente</button>
+                        <button type="button" class="btn-secondary" onclick="desfazerAjuste()">↩️ Desfazer último ajuste</button>
+                        <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Backup</button>
+                        <input type="file" id="importBackup" accept=".json" style="display: none;" onchange="importarBackup(event)">
+                        <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Backup</button>
+                    </div>
+
+                    <div class="grade-container">
+                        <table class="grade-horarios" id="tabelaGrade">
+                            <!-- preenchida via JS -->
+                        </table>
+                    </div>
+
+                    <p class="hint">
+                        <strong>Clique em qualquer célula (vazia ou com aula) para editar.</strong><br>
+                        Clique em uma célula vazia para lançar nova aula. Clique em uma aula para editar.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <h3>Limpeza de Horários (Novo Semestre)</h3>
+                    <div class="form-grid">
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label>Apagar toda a tabela:</label>
+                            <button type="button" class="btn-danger" onclick="limparTodasAulas()">🗑️ Apagar todos os horários</button>
+                        </div>
+                        <div class="form-group">
+                            <label>Apagar horários da turma:</label>
+                            <select id="turmaLimpeza">
+                                <option value="">Selecione a turma...</option>
+                            </select>
+                            <button type="button" class="btn-warning small" style="margin-top:4px;" onclick="limparAulasTurma()">Apagar da turma</button>
+                        </div>
+                        <div class="form-group">
+                            <label>Apagar por dia da semana:</label>
+                            <select id="diaLimpeza">
+                                <option value="">Selecione o dia...</option>
+                                <option value="SEGUNDA">Segunda</option>
+                                <option value="TERCA">Terça</option>
+                                <option value="QUARTA">Quarta</option>
+                                <option value="QUINTA">Quinta</option>
+                                <option value="SEXTA">Sexta</option>
+                                <option value="SABADO">Sábado</option>
+                            </select>
+                            <select id="turnoLimpeza" style="margin-top:4px;">
+                                <option value="TODOS">Todos os turnos</option>
+                                <option value="MANHA">Manhã</option>
+                                <option value="TARDE">Tarde</option>
+                                <option value="NOITE">Noite</option>
+                            </select>
+                            <button type="button" class="btn-warning small" style="margin-top:4px;" onclick="limparAulasDiaSemana()">Apagar do dia</button>
+                        </div>
+                    </div>
+                    <p class="hint">
+                        Recomenda-se usar <strong>Exportar Backup</strong> antes de apagar horários, para manter um histórico do semestre anterior.
+                    </p>
+                </div>
+
+                <div class="card">
+                    <h3>Configuração de Tempos por Turno</h3>
+                <div class="form-grid">
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <div class="chips-group" id="chips-turno-tempos">
+                                <button type="button" class="chip selecionado" data-value="MANHA" onclick="selecionarTurnoTempos(this)">Manhã</button>
+                                <button type="button" class="chip" data-value="TARDE" onclick="selecionarTurnoTempos(this)">Tarde</button>
+                                <button type="button" class="chip" data-value="NOITE" onclick="selecionarTurnoTempos(this)">Noite</button>
+                            </div>
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <div class="table-wrapper">
+                                <table class="tabela-padrao">
+                                    <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Etiqueta</th>
+                                            <th>Início</th>
+                                            <th>Fim</th>
+                                            <th>Intervalo</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="temposConfigBody"></tbody>
+                                </table>
+                            </div>
+                            <div class="inline-group" style="margin-top:8px;">
+                                <button class="btn-secondary" type="button" onclick="adicionarTempoTurno()">Adicionar tempo</button>
+                                <button class="btn-primary" type="button" onclick="salvarTemposTurno()">Salvar tempos do turno</button>
+                            </div>
+                            <p class="hint">Os IDs dos tempos são por turno (1, 2, 3...). Ajuste etiqueta e horários conforme necessário.</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="modalTempos" class="modal">
+                    <div class="modal-content modal-tempos">
+                        <h3>Tempos por Turno</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label>Turno:</label>
+                                <div class="chips-group" id="chips-turno-tempos-modal">
+                                    <button type="button" class="chip selecionado" data-value="MANHA" onclick="selecionarTurnoTemposModal(this)">Manhã</button>
+                                    <button type="button" class="chip" data-value="TARDE" onclick="selecionarTurnoTemposModal(this)">Tarde</button>
+                                    <button type="button" class="chip" data-value="NOITE" onclick="selecionarTurnoTemposModal(this)">Noite</button>
+                                </div>
+                            </div>
+                            <div class="form-group" style="grid-column: 1 / -1;">
+                                <div class="table-wrapper">
+                                    <table class="tabela-padrao">
+                                        <thead>
+                                        <tr>
+                                            <th>#</th>
+                                            <th>Etiqueta</th>
+                                            <th>Início</th>
+                                            <th>Fim</th>
+                                            <th>Intervalo</th>
+                                            <th>Ações</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody id="temposConfigBodyModal"></tbody>
+                                    </table>
+                                </div>
+                                <div class="inline-group" style="margin-top:8px;">
+                                    <button class="btn-secondary" type="button" onclick="adicionarTempoTurnoModal()">Adicionar tempo</button>
+                                    <button class="btn-primary" type="button" onclick="salvarTemposTurnoModal()">Salvar tempos do turno</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-actions">
+                            <button type="button" class="btn-secondary" onclick="fecharModalTempos()">Fechar</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ================= RELATÓRIOS / PDFs ================= -->
+            <section id="relatorios" class="section">
+                <h2>Relatórios e PDFs</h2>
+
+                <div class="card">
+                    <h3>Relatório por Turno</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <select id="turnoRelatorio">
+                                <option value="MANHA">Manhã</option>
+                                <option value="TARDE">Tarde</option>
+                                <option value="NOITE">Noite</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Formato do layout:</label>
+                            <select id="layoutRelatorio">
+                                <option value="compacto">Compacto</option>
+                                <option value="colorido">Colorido por professor</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Opções:</label>
+                            <div class="inline-group">
+                                <label><input type="checkbox" id="omitirSabadoRelatorios"> Omitir sábado</label>
+                            </div>
+                        </div>
+                        <div class="form-group full-row">
+                            <div class="inline-group">
+                                <button class="btn-pdf" type="button" onclick="gerarRelatorioTurnoPDF()">📄 Gerar PDF do Turno</button>
+                                <button class="btn-secondary" type="button" onclick="gerarRelatorioTurnoXLS()">📊 Exportar XLS do Turno</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Relatório por Curso</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Curso / Área:</label>
+                            <select id="cursoRelatorio">
+                                <!-- preenchido via JS -->
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <select id="turnoRelatorioCurso">
+                                <option value="MANHA">Manhã</option>
+                                <option value="TARDE">Tarde</option>
+                                <option value="NOITE">Noite</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Formato do layout:</label>
+                            <select id="layoutRelatorioCurso">
+                                <option value="compacto">Compacto</option>
+                                <option value="colorido">Colorido por professor</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Opções:</label>
+                            <div class="inline-group">
+                                <label><input type="checkbox" id="omitirSabadoRelatorioCurso"> Omitir sábado</label>
+                            </div>
+                        </div>
+                        <div class="form-group full-row">
+                            <div class="inline-group">
+                                <button class="btn-pdf" type="button" onclick="gerarRelatorioCursoPDF()">📄 Gerar PDF do Curso</button>
+                                <button class="btn-secondary" type="button" onclick="gerarRelatorioCursoXLS()">📊 Exportar XLS do Curso</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Relatório por Professor</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Professor:</label>
+                            <select id="professorRelatorio">
+                                <option value="">Selecione...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="profRelatorioMostrarGraficos" checked> Mostrar gráficos</label>
+                        </div>
+                        <div class="form-group">
+                            <label><input type="checkbox" id="profRelatorioMostrarVagos" checked> Mostrar “Tempo vago na escola”</label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn-primary" type="button" onclick="gerarTabelaProfessor()">📊 Gerar Tabela</button>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn-pdf" type="button" onclick="gerarRelatorioProfessorPDF()">📄 Gerar PDF do Professor</button>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn-secondary" type="button" onclick="preverImpressaoProfessor()">🖨️ Pré-visualizar impressão</button>
+                        </div>
+                    </div>
+                    <p id="tabelaProfessorTitulo" class="hint" style="margin: 8px 0 4px 0; font-weight: 600;"></p>
+                    <div class="table-wrapper">
+                        <table class="tabela-padrao" id="tabelaProfessor">
+                            <thead>
+                            <tr>
+                                <th>Dia</th>
+                                <th>Turno</th>
+                                <th>Horário</th>
+                                <th>Tempo</th>
+                                <th>Turma</th>
+                                <th>Disciplina</th>
+                            </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <p class="hint" id="profTempoVagoHint">
+                        Os intervalos em que o professor está na escola mas sem aula aparecem como
+                        <strong>Tempo vago na escola</strong>.
+                    </p>
+                    <div class="prof-charts">
+                        <div class="chart-card">
+                            <h4>Carga por dia da semana</h4>
+                            <canvas id="chartProfDiasSemana"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h4>Carga por turno</h4>
+                            <canvas id="chartProfTurnos"></canvas>
+                        </div>
+                        <div class="chart-card">
+                            <h4>Carga mensal por dia da semana</h4>
+                            <canvas id="chartProfDiasMes"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- card removido: filtros movidos para cadastro do Professor -->
+            </section>
+
+            <!-- ================= CONSULTAS AVANÇADAS ================= -->
+            <section id="consultas" class="section">
+                <h2>Consultas Avançadas</h2>
+
+                <div class="card">
+                    <h3>Filtros de Consulta</h3>
+                    <div class="form-grid">
+                        <div class="form-group full-row">
+                            <div class="inline-group" style="align-items: flex-end; width: 100%;">
+                                <div class="form-group" style="flex: 1;">
+                                    <label for="tipoConsulta">Tipo de consulta:</label>
+                                    <select id="tipoConsulta">
+                                        <option value="professores">Professores</option>
+                                        <option value="turmas">Turmas</option>
+                                        <option value="turnos">Turnos</option>
+                                        <option value="cursos">Cursos / Áreas</option>
+                                    </select>
+                                </div>
+                                <div class="form-group" style="flex: 0 0 auto; margin-top: 0;">
+                                    <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Resultado</h3>
+                    <div class="table-wrapper">
+                        <table class="tabela-padrao" id="tabelaConsulta">
+                            <thead></thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+</div>
+
+<!-- Modal Novo Curso -->
+<div id="modalCurso" class="modal">
+    <div class="modal-content">
+        <h3>Novo Curso / Área</h3>
+        <form id="formNovoCurso">
+            <div class="form-group">
+                <label for="nomeNovoCurso">Nome do curso/área:</label>
+                <input type="text" id="nomeNovoCurso" required>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="fecharModalCurso()">Cancelar</button>
+                <button type="submit" class="btn-primary">Salvar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal de edição de aula -->
+<div id="modalAula" class="modal">
+    <div class="modal-content modal-aula">
+        <h3>Editar Aula</h3>
+        <form id="formModalAula" class="form-grid">
+            <input type="hidden" id="modalAulaId">
+            <div class="form-group">
+                <label>Turma:</label>
+                <input type="text" id="modalTurma" readonly>
+            </div>
+            <div class="form-group">
+                <label>Dia:</label>
+                <input type="text" id="modalDia" readonly>
+            </div>
+            <div class="form-group">
+                <label>Horário:</label>
+                <input type="text" id="modalHorario" readonly>
+            </div>
+            <div class="form-group">
+                <label for="modalDisciplina">Disciplina:</label>
+                <input type="text" id="modalDisciplina">
+            </div>
+            <div class="form-group">
+                <label for="modalProfessor">Professor:</label>
+                <select id="modalProfessor">
+                    <option value="">Selecione...</option>
+                </select>
+            </div>
+            <div class="form-group modal-aula-actions">
+                <button type="button" class="btn-danger" id="btnExcluirAulaModal">Excluir aula</button>
+                <button type="submit" class="btn-primary">Salvar alterações</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal de edição de Professor -->
+<div id="modalProfessorPerfil" class="modal">
+    <div class="modal-content modal-prof">
+        <h3>Editar Professor</h3>
+        <form id="formModalProfessor" class="form-grid">
+            <input type="hidden" id="modalProfessorId">
+            <div class="form-group">
+                <label>Nome</label>
+                <input type="text" id="modalProfNome" required>
+            </div>
+            <div class="form-group">
+                <label>Disciplinas (vírgula)</label>
+                <input type="text" id="modalProfDisciplinas" placeholder="Matemática, Física, ...">
+            </div>
+            <div class="form-group">
+                <label>Cor</label>
+                <input type="color" id="modalProfCor" value="#3498db">
+            </div>
+            <div class="form-group full-row">
+                <label>Disponibilidade por dia/turno</label>
+                <div id="modalDispProfessor" class="disp-grid"></div>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="fecharModalProfessor()">Cancelar</button>
+                <button type="submit" class="btn-primary">Salvar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script src="script.js"></script>
+</body>
+</html>
