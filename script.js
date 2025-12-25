@@ -86,6 +86,8 @@ let usuarioLogado = null;
 
 // Controle do editor visual / ajuste inteligente
 let turnoAtualGrade = 'MANHA';
+let modoVisualGrade = 'TURNO';
+let cursoVisualGrade = '';
 let pilhaUndo = []; // para desfazer ajustes inteligentes
 
 // Controle do modal de edição de aula
@@ -420,6 +422,25 @@ function mudarTurnoVisual(btn) {
     }
     selecionarChip('chips-turno-visual', 'turnoGradeFake', btn);
     turnoAtualGrade = btn.getAttribute('data-value');
+    montarGradeTurno(turnoAtualGrade);
+}
+
+function mudarModoVisual(btn) {
+    const group = document.getElementById('chips-modo-visual');
+    if (group) {
+        group.querySelectorAll('.chip').forEach(c => c.classList.remove('selecionado'));
+        btn.classList.add('selecionado');
+    }
+    modoVisualGrade = btn.getAttribute('data-value') || 'TURNO';
+    const filtroCurso = document.getElementById('filtro-curso-visual');
+    if (filtroCurso) {
+        filtroCurso.style.display = modoVisualGrade === 'CURSO' ? '' : 'none';
+    }
+    montarGradeTurno(turnoAtualGrade);
+}
+
+function mudarCursoVisual(select) {
+    cursoVisualGrade = select.value || '';
     montarGradeTurno(turnoAtualGrade);
 }
 
@@ -812,6 +833,21 @@ function preencherSelectCursos() {
         opt.textContent = curso;
         sel.appendChild(opt);
     });
+}
+
+function preencherSelectCursoVisual() {
+    const sel = document.getElementById('cursoVisual');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Todos os cursos</option>';
+    cursos.forEach(curso => {
+        const opt = document.createElement('option');
+        opt.value = curso;
+        opt.textContent = curso;
+        sel.appendChild(opt);
+    });
+    if (cursoVisualGrade && cursos.includes(cursoVisualGrade)) {
+        sel.value = cursoVisualGrade;
+    }
 }
 
 function abrirModalCurso() {
@@ -1237,9 +1273,15 @@ function montarGradeTurno(turno) {
     if (!tabela) return;
     tabela.innerHTML = '';
 
-    const turmasTurno = turmas.filter(t => t.turno === turno);
+    let turmasTurno = turmas.filter(t => t.turno === turno);
+    if (modoVisualGrade === 'CURSO' && cursoVisualGrade) {
+        turmasTurno = turmasTurno.filter(t => t.curso === cursoVisualGrade);
+    }
     if (!turmasTurno.length) {
-        tabela.innerHTML = '<tr><td class="hint" style="padding:8px;">Não há turmas cadastradas neste turno.</td></tr>';
+        const msg = modoVisualGrade === 'CURSO' && cursoVisualGrade
+            ? 'Não há turmas deste curso neste turno.'
+            : 'Não há turmas cadastradas neste turno.';
+        tabela.innerHTML = `<tr><td class="hint" style="padding:8px;">${msg}</td></tr>`;
         return;
     }
 
@@ -3816,6 +3858,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // inicial
     preencherSelectCursos();
+    preencherSelectCursoVisual();
     atualizarListaProfessores();
     atualizarListaTurmas();
     atualizarChipsTempos();
