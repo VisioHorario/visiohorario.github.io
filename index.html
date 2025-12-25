@@ -15,6 +15,10 @@
     <!-- Chart.js para gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -22,27 +26,26 @@
     <header>
         <div class="header-inner">
             <div class="header-text">
-                <h1>Visio Horários Escolares</h1>
-                <p>Organize professores, turmas e turnos em poucos cliques</p>
-            </div>
-            <div class="header-icons">
-                <div class="icon-circle">⏰</div>
-                <div class="icon-circle">📅</div>
-                <div class="icon-circle">📚</div>
+                <h1><span class="header-highlight">Visio Horários Escolares</span></h1>
+                <p class="header-subtitle">Organize professores, turmas e turnos em poucos cliques</p>
             </div>
         </div>
     </header>
 
     <div id="loginCard" class="card login-card">
-        <h3>Acesso ao Sistema</h3>
+        <div class="login-header">
+            <div class="login-icon">🔐</div>
+            <h3>Acesso ao Sistema</h3>
+            <p class="login-subtitle">Use o usuário administrador da sua escola para entrar</p>
+        </div>
         <form id="formLogin" class="form-grid">
             <div class="form-group">
-                <label for="loginUsuario">Usuário:</label>
-                <input type="text" id="loginUsuario" autocomplete="username">
+                <label for="loginUsuario">Usuário</label>
+                <input type="text" id="loginUsuario" autocomplete="username" placeholder="ex.: admin-escola">
             </div>
             <div class="form-group">
-                <label for="senhaUsuario">Senha:</label>
-                <input type="password" id="senhaUsuario" autocomplete="current-password">
+                <label for="senhaUsuario">Senha</label>
+                <input type="password" id="senhaUsuario" autocomplete="current-password" placeholder="Digite sua senha">
             </div>
             <div class="form-group full-row">
                 <button type="submit" class="btn-primary">Entrar</button>
@@ -252,7 +255,7 @@
                 </div>
 
                 <div class="card">
-                    <h3>Editor Visual do Turno</h3>
+                    <h3>Editor Visual</h3>
                     <p id="editorTurnoHint" class="hint editor-turno-hint">
                         <label class="editor-hint-toggle">
                             <input type="checkbox" id="chkMostrarInstrucoesEditor">
@@ -265,14 +268,31 @@
                     </p>
 
                     <div class="filtros-grade">
-                        <span>Turno visualizado:</span>
-                        <div class="chips-group" id="chips-turno-visual">
-                            <button type="button" class="chip selecionado" data-value="MANHA"
-                                    onclick="mudarTurnoVisual(this)">Manhã</button>
-                            <button type="button" class="chip" data-value="TARDE"
-                                    onclick="mudarTurnoVisual(this)">Tarde</button>
-                            <button type="button" class="chip" data-value="NOITE"
-                                    onclick="mudarTurnoVisual(this)">Noite</button>
+                        <div class="filtros-grade-group">
+                            <span>Modo de visualização:</span>
+                            <div class="chips-group" id="chips-modo-visual">
+                                <button type="button" class="chip selecionado" data-value="TURNO"
+                                        onclick="mudarModoVisual(this)">Por turno</button>
+                                <button type="button" class="chip" data-value="CURSO"
+                                        onclick="mudarModoVisual(this)">Por curso</button>
+                            </div>
+                        </div>
+                        <div class="filtros-grade-group">
+                            <span>Turno visualizado:</span>
+                            <div class="chips-group" id="chips-turno-visual">
+                                <button type="button" class="chip selecionado" data-value="MANHA"
+                                        onclick="mudarTurnoVisual(this)">Manhã</button>
+                                <button type="button" class="chip" data-value="TARDE"
+                                        onclick="mudarTurnoVisual(this)">Tarde</button>
+                                <button type="button" class="chip" data-value="NOITE"
+                                        onclick="mudarTurnoVisual(this)">Noite</button>
+                            </div>
+                        </div>
+                        <div class="filtros-grade-group" id="filtro-curso-visual" style="display:none;">
+                            <span>Curso:</span>
+                            <select id="cursoVisual" onchange="mudarCursoVisual(this)">
+                                <option value="">Todos os cursos</option>
+                            </select>
                         </div>
                     </div>
 
@@ -331,7 +351,7 @@
                         </div>
                     </div>
                     <p class="hint">
-                        Recomenda-se usar <strong>Exportar Backup</strong> antes de apagar horários, para manter um histórico do semestre anterior.
+                        Recomenda-se usar o botão <strong>Exportar Backup</strong> acima, antes de apagar horários, para manter um histórico do semestre anterior.
                     </p>
                 </div>
 
