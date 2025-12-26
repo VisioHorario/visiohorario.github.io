@@ -210,6 +210,17 @@ function migrarEstruturaLocal() {
     turmas = Array.isArray(turmas) ? turmas : [];
     aulas = Array.isArray(aulas) ? aulas : [];
     professores.forEach(p => {
+        if (p && !Array.isArray(p.disciplinas)) {
+            if (typeof p.disciplinas === 'string' && p.disciplinas.trim()) {
+                p.disciplinas = p.disciplinas
+                    .split(',')
+                    .map(s => s.trim())
+                    .filter(Boolean);
+            } else {
+                p.disciplinas = [];
+            }
+            alterou = true;
+        }
         if (!Array.isArray(p.diasDisponiveis)) { p.diasDisponiveis = []; alterou = true; }
         if (!Array.isArray(p.turnosDisponiveis)) { p.turnosDisponiveis = []; alterou = true; }
         if (p.disponibilidadePorDia === undefined) { p.disponibilidadePorDia = null; alterou = true; }
@@ -1317,11 +1328,15 @@ function montarGradeTurno(turno) {
 
     const tbody = document.createElement('tbody');
 
+    const chkOmitirSabado = document.getElementById('chkOmitirSabadoGrade');
+    const omitirSabadoGrade = !!(chkOmitirSabado && chkOmitirSabado.checked);
+
     DIAS_SEMANA.forEach(dia => {
+        if (omitirSabadoGrade && dia === 'SABADO') return;
         let primeiraLinhaDia = true;
 
         const temposTurno = getTempos(turno);
-        temposTurno.forEach(tempo => {
+        temposTurno.forEach((tempo, idxTempo) => {
             const tr = document.createElement('tr');
 
             if (primeiraLinhaDia) {
@@ -1476,6 +1491,10 @@ function montarGradeTurno(turno) {
 
                     tr.appendChild(td);
                 });
+            }
+
+            if (idxTempo === temposTurno.length - 1) {
+                tr.classList.add('linha-dia');
             }
 
             tbody.appendChild(tr);
@@ -2603,6 +2622,12 @@ function gerarTabelaProfessor() {
 
     const carga = calcularCargaHorariaProfessor(aulasProf);
 
+    const disciplinasUsadas = [...new Set(
+        aulasProf
+            .map(a => a.disciplina)
+            .filter(Boolean)
+    )];
+
     const grupos = {};
     aulasProf.forEach(a => {
         const key = `${a.dia}_${a.turno}`;
@@ -2807,7 +2832,17 @@ function preverImpressaoProfessor() {
         mostrarToast('Gere a tabela do professor antes de pré-visualizar a impressão.', 'warning');
         return;
     }
+    const prof = professores.find(p => p.id === profId);
+    const tituloEl = document.querySelector('#relatorios h2');
+    let tituloOriginal = null;
+    if (prof && tituloEl) {
+        tituloOriginal = tituloEl.textContent;
+        tituloEl.textContent = `Relatório do Professor ${prof.nome}`;
+    }
     window.print();
+    if (tituloEl && tituloOriginal !== null) {
+        tituloEl.textContent = tituloOriginal;
+    }
 }
 
 function calcularCargaHorariaProfessor(aulasProf) {
@@ -2857,6 +2892,11 @@ function atualizarGraficosProfessor(aulasProf) {
     const turnosKeys = TURNOS.filter(t => byTurno[t]);
     const turnosLabels = turnosKeys.map(t => textoTurno(t));
     const turnosValues = turnosKeys.map(t => byTurno[t]);
+
+    const resumoDiasEl = document.getElementById('chartProfDiasResumo');
+    const resumoTurnosEl = document.getElementById('chartProfTurnosResumo');
+    const resumoMesEl = document.getElementById('chartProfDiasMesResumo');
+    const cargaTotal = calcularCargaHorariaProfessor(aulasProf);
 
     if (chartProfDias) chartProfDias.destroy();
     chartProfDias = new Chart(ctxDias, {
@@ -2986,6 +3026,22 @@ function atualizarGraficosProfessor(aulasProf) {
             }
         }
     });
+
+    if (resumoDiasEl) {
+        resumoDiasEl.textContent =
+            `Total: ${cargaTotal.temposSemana} tempos na semana ` +
+            `(${cargaTotal.horasSemana}h semanais, aproximadamente ${cargaTotal.horasMes}h mensais).`;
+    }
+    if (resumoTurnosEl) {
+        resumoTurnosEl.textContent =
+            `Total: ${cargaTotal.temposSemana} tempos na semana ` +
+            `(${cargaTotal.horasSemana}h semanais, aproximadamente ${cargaTotal.horasMes}h mensais).`;
+    }
+    if (resumoMesEl) {
+        resumoMesEl.textContent =
+            `Total: ${cargaTotal.horasMes}h por mês ` +
+            `(${cargaTotal.temposSemana} tempos por semana).`;
+    }
 }
 
 function gerarRelatorioProfessorPDF() {
@@ -3202,10 +3258,27 @@ function gerarRelatorioProfessorPDF() {
         }
     });
 
+    const disciplinasUsadas = [...new Set(aulasProf.map(a => a.disciplina).filter(Boolean))];
+
+    const disciplinasLabel =
+        (disciplinasUsadas.length
+            ? disciplinasUsadas.join(', ')
+            : (Array.isArray(prof.disciplinas) && prof.disciplinas.length
+                ? prof.disciplinas.join(', ')
+                : 'Não informado'));
+
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.text(
+        `Disciplinas: ${disciplinasLabel}`,
+        14,
+        30
+    );
+
     doc.autoTable({
         head,
         body,
-        startY: 28,
+        startY: 34,
         theme: 'grid',
         styles: {
             fontSize: 9,
@@ -3538,11 +3611,16 @@ function gerarConsulta() {
         professores.forEach(p => {
             const aulasProfessor = aulas.filter(a => a.professorId === p.id);
             const turnos = [...new Set(aulasProfessor.map(a => a.turno))];
+            const disciplinasUsadas = [...new Set(
+                aulasProfessor
+                    .map(a => a.disciplina)
+                    .filter(Boolean)
+            )];
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${p.nome}</strong></td>
-                <td>${p.disciplinas.join(', ') || '-'}</td>
+                <td>${disciplinasUsadas.join(', ') || '-'}</td>
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${aulasProfessor.length}</span></td>
                 <td>${turnos.map(t => textoTurno(t)).join(', ') || '-'}</td>
             `;

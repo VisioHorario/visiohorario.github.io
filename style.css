@@ -16,7 +16,10 @@
 
 body {
     font-family: "Poppins", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    background-image: url('tabela.png');
+    background-size: cover;
+    background-position: center 60%;
+    background-attachment: fixed;
     min-height: 100vh;
     color: #333;
 }
@@ -25,35 +28,67 @@ body {
     width: 100%;
     max-width: 100%;
     margin: 0 auto;
-    padding: 16px;
+    padding: 8px 0 16px 0;
 }
 
 header {
     color: #fff;
-    margin-bottom: 20px;
-    background-image:
-        linear-gradient(120deg, rgba(60, 110, 220, 0.30), rgba(90, 140, 240, 0.26)),
-        url('tabela.png');
-    background-size: cover;
-    background-position: center 60%;
-    background-repeat: no-repeat;
-    border-radius: 18px;
-    padding: 30px 32px 26px 32px;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35);
-    overflow: hidden;
+    margin-bottom: 10px;
+    background: transparent;
+    border-radius: 0;
+    padding: 4px 0 4px 0;
+    box-shadow: none;
+    overflow: visible;
 }
 
 .header-inner {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    align-items: center;
+    justify-content: center;
     gap: 14px;
+    width: 100%;
 }
 
 .header-text {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    width: 100%;
+}
+
+.logo-visio {
+    width: 100%;
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto;
+    object-fit: contain;
+    object-position: center top;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,0.15));
+    opacity: 0.35;
+}
+
+@keyframes bannerFadeUp {
+    0% {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    100% {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.logo-visio .banner-subtitle,
+.logo-visio .banner-tagline {
+    opacity: 0;
+    animation: bannerFadeUp 0.9s ease-out forwards;
+    transform-box: fill-box;
+    transform-origin: left center;
+}
+
+.logo-visio .banner-tagline {
+    animation-delay: 0.25s;
 }
 
 .header-text h1 {
@@ -101,6 +136,7 @@ header {
     flex-direction: column;
     gap: 0;
     background: #fff;
+    margin: 0 16px;
     border-radius: 16px;
     overflow: hidden;
     box-shadow: 0 10px 30px rgba(0,0,0,0.25);
@@ -178,7 +214,7 @@ header {
 
 .login-card {
     max-width: 420px;
-    margin: 28px auto 24px auto;
+    margin: 10px auto 24px auto;
     padding: 24px 28px;
     box-shadow: 0 14px 38px rgba(0,0,0,0.28);
 }
@@ -239,6 +275,10 @@ header {
     gap: 12px 18px;
     /* align-items: flex-end; removido para evitar problemas de alinhamento vertical */
 }
+
+#formProfessor.form-grid {
+    grid-template-columns: repeat(3, minmax(200px, 1fr));
+}
  
 .full-row {
     grid-column: 1 / -1;
@@ -256,20 +296,25 @@ header {
     color: #2c3e50;
 }
 
+.label-help {
+    font-size: 0.8rem;
+    font-weight: 400;
+}
+
 .form-group input[type="text"],
 .form-group input[type="password"],
 .form-group input[type="time"],
 .form-group select {
-    padding: 7px 8px;
+    padding: 6px 8px;
     border-radius: 8px;
     border: 1px solid #ccd6dd;
-    font-size: 0.9rem;
+    font-size: 0.85rem;
 }
 
 .form-group input[type="color"] {
     padding: 0;
-    width: 56px;
-    height: 32px;
+    width: 48px;
+    height: 28px;
     border-radius: 8px;
     border: 1px solid #ccd6dd;
 }
@@ -477,7 +522,9 @@ button.small {
 
 /* Grade de horários */
 .grade-container {
-    overflow-x: auto;
+    position: relative;
+    overflow: auto;
+    max-height: 900px;
     border-radius: 10px;
     border: 1px solid #dfe6eb;
     background: #fff;
@@ -490,12 +537,22 @@ button.small {
     table-layout: fixed;
 }
 
+.grade-horarios thead th {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+}
+
 .grade-horarios th,
 .grade-horarios td {
     border: 1px solid #dfe6eb;
     text-align: center;
     vertical-align: middle;
     padding: 3px 2px;
+}
+
+.grade-horarios tr.linha-dia td {
+    border-bottom: 2px solid #95a5a6;
 }
 
 .grade-horarios th.horario-col {

@@ -26,8 +26,45 @@
     <header>
         <div class="header-inner">
             <div class="header-text">
-                <h1><span class="header-highlight">Visio Horários Escolares</span></h1>
-                <p class="header-subtitle">Organize professores, turmas e turnos em poucos cliques</p>
+                <svg class="logo-visio"
+                     viewBox="0 0 1920 180"
+                     xmlns="http://www.w3.org/2000/svg">
+                    <defs>
+                        <linearGradient id="bgGradient" x1="0" y1="0" x2="1" y2="0">
+                            <stop offset="0%" stop-color="#0B1D2A"/>
+                            <stop offset="50%" stop-color="#123A5A"/>
+                            <stop offset="100%" stop-color="#1F6FB2"/>
+                        </linearGradient>
+                        <linearGradient id="vGradient" x1="0" y1="0" x2="1" y2="1">
+                            <stop offset="0%" stop-color="#6EC1FF"/>
+                            <stop offset="100%" stop-color="#1F6FB2"/>
+                        </linearGradient>
+                    </defs>
+                    <rect width="1920" height="180" fill="url(#bgGradient)"/>
+                    <text x="120" y="110"
+                          font-family="Poppins, Montserrat, Arial, sans-serif"
+                          font-size="70"
+                          font-weight="700"
+                          fill="white">
+                        <tspan fill="url(#vGradient)">V</tspan>isio
+                    </text>
+                    <text x="300" y="95"
+                          font-family="Poppins, Montserrat, Arial, sans-serif"
+                          font-size="40"
+                          font-weight="600"
+                          fill="white"
+                          class="banner-subtitle">
+                        Gestão Inteligente de Horários Escolares
+                    </text>
+                    <text x="300" y="130"
+                          font-family="Poppins, Montserrat, Arial, sans-serif"
+                          font-size="22"
+                          font-weight="600"
+                          fill="#DCEEFF"
+                          class="banner-tagline">
+                        Organize professores, turmas e turnos em poucos cliques.
+                    </text>
+                </svg>
             </div>
         </div>
     </header>
@@ -79,7 +116,9 @@
                             <input type="text" id="nomeProfessor" required>
                         </div>
                         <div class="form-group">
-                            <label for="disciplinasProfessor">Disciplinas (separadas por vírgula):</label>
+                            <label for="disciplinasProfessor">
+                                Disciplinas <span class="label-help">(separadas por vírgula)</span>:
+                            </label>
                             <input type="text" id="disciplinasProfessor" placeholder="Matemática, Física, ...">
                         </div>
                         <div class="form-group">
@@ -294,6 +333,12 @@
                                 <option value="">Todos os cursos</option>
                             </select>
                         </div>
+                        <div class="filtros-grade-group">
+                            <label style="display:inline-flex; align-items:center; gap:4px;">
+                                <input type="checkbox" id="chkOmitirSabadoGrade" onclick="montarGradeTurno(turnoAtualGrade)">
+                                Ocultar sábado
+                            </label>
+                        </div>
                     </div>
 
                     <div class="editor-actions">
@@ -319,35 +364,37 @@
                 <div class="card">
                     <h3>Limpeza de Horários (Novo Semestre)</h3>
                     <div class="form-grid">
-                        <div class="form-group" style="grid-column: 1 / -1;">
-                            <label>Apagar toda a tabela:</label>
-                            <button type="button" class="btn-danger" onclick="limparTodasAulas()">🗑️ Apagar todos os horários</button>
-                        </div>
-                        <div class="form-group">
+                        <div class="form-group full-row">
                             <label>Apagar horários da turma:</label>
                             <select id="turmaLimpeza">
                                 <option value="">Selecione a turma...</option>
                             </select>
-                            <button type="button" class="btn-warning small" style="margin-top:4px;" onclick="limparAulasTurma()">Apagar da turma</button>
+                            <button type="button" class="btn-warning" onclick="limparAulasTurma()">🗑️ Apagar da turma</button>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group full-row">
                             <label>Apagar por dia da semana:</label>
-                            <select id="diaLimpeza">
-                                <option value="">Selecione o dia...</option>
-                                <option value="SEGUNDA">Segunda</option>
-                                <option value="TERCA">Terça</option>
-                                <option value="QUARTA">Quarta</option>
-                                <option value="QUINTA">Quinta</option>
-                                <option value="SEXTA">Sexta</option>
-                                <option value="SABADO">Sábado</option>
-                            </select>
-                            <select id="turnoLimpeza" style="margin-top:4px;">
-                                <option value="TODOS">Todos os turnos</option>
-                                <option value="MANHA">Manhã</option>
-                                <option value="TARDE">Tarde</option>
-                                <option value="NOITE">Noite</option>
-                            </select>
-                            <button type="button" class="btn-warning small" style="margin-top:4px;" onclick="limparAulasDiaSemana()">Apagar do dia</button>
+                            <div class="inline-group">
+                                <select id="diaLimpeza">
+                                    <option value="">Selecione o dia...</option>
+                                    <option value="SEGUNDA">Segunda</option>
+                                    <option value="TERCA">Terça</option>
+                                    <option value="QUARTA">Quarta</option>
+                                    <option value="QUINTA">Quinta</option>
+                                    <option value="SEXTA">Sexta</option>
+                                    <option value="SABADO">Sábado</option>
+                                </select>
+                                <select id="turnoLimpeza">
+                                    <option value="TODOS">Todos os turnos</option>
+                                    <option value="MANHA">Manhã</option>
+                                    <option value="TARDE">Tarde</option>
+                                    <option value="NOITE">Noite</option>
+                                </select>
+                            </div>
+                            <button type="button" class="btn-warning" onclick="limparAulasDiaSemana()">🗑️ Apagar do dia</button>
+                        </div>
+                        <div class="form-group full-row">
+                            <label>Apagar toda a tabela:</label>
+                            <button type="button" class="btn-danger" onclick="limparTodasAulas()">🗑️ Apagar todos os horários</button>
                         </div>
                     </div>
                     <p class="hint">
@@ -557,14 +604,17 @@
                         <div class="chart-card">
                             <h4>Carga por dia da semana</h4>
                             <canvas id="chartProfDiasSemana"></canvas>
+                            <p id="chartProfDiasResumo" class="hint"></p>
                         </div>
                         <div class="chart-card">
                             <h4>Carga por turno</h4>
                             <canvas id="chartProfTurnos"></canvas>
+                            <p id="chartProfTurnosResumo" class="hint"></p>
                         </div>
                         <div class="chart-card">
                             <h4>Carga mensal por dia da semana</h4>
                             <canvas id="chartProfDiasMes"></canvas>
+                            <p id="chartProfDiasMesResumo" class="hint"></p>
                         </div>
                     </div>
                 </div>
