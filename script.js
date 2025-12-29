@@ -131,6 +131,92 @@ function textoDia(sigla) {
     }
 }
 
+function textoTipoTurma(tipo) {
+    if (tipo === 'INTEGRADO') return 'Integrado ao Médio';
+    if (tipo === 'SUBSEQUENTE') return 'Subsequente ao Médio';
+    if (tipo === 'MEDIO') return 'Médio';
+    if (tipo === 'FUNDAMENTAL1') return 'Fundamental 1';
+    if (tipo === 'FUNDAMENTAL') return 'Fundamental 2';
+    return '';
+}
+
+function textoAnoTurma(ano) {
+    if (ano === '1ANO') return '1º Ano';
+    if (ano === '2ANO') return '2º Ano';
+    if (ano === '3ANO') return '3º Ano';
+    if (ano === '4ANO') return '4º Ano';
+    if (ano === '5ANO') return '5º Ano';
+    if (ano === '6ANO') return '6º Ano';
+    if (ano === '7ANO') return '7º Ano';
+    if (ano === '8ANO') return '8º Ano';
+    if (ano === '9ANO') return '9º Ano';
+    return '';
+}
+
+function textoFaseTurma(fase) {
+    if (fase === 'I') return 'I Fase';
+    if (fase === 'II') return 'II Fase';
+    if (fase === 'III') return 'III Fase';
+    if (fase === 'IV') return 'IV Fase';
+    if (fase === 'V') return 'V Fase';
+    if (fase === 'VI') return 'VI Fase';
+    return '';
+}
+
+function atualizarOpcoesFaseTurma(idSelectAno, idSelectFase) {
+    const selAno = document.getElementById(idSelectAno);
+    const selFase = document.getElementById(idSelectFase);
+    if (!selAno || !selFase) return;
+    const ano = selAno.value;
+    let fases = [];
+    if (ano === '1ANO') {
+        fases = ['I', 'II'];
+    } else if (ano === '2ANO') {
+        fases = ['III', 'IV'];
+    } else if (ano === '3ANO') {
+        fases = ['V', 'VI'];
+    }
+    selFase.innerHTML = '<option value="">Fase...</option>';
+    fases.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        opt.textContent = textoFaseTurma(f);
+        selFase.appendChild(opt);
+    });
+}
+
+function atualizarOpcoesAnoTurma(idSelectTipo, idSelectAno, idSelectFase) {
+    const selTipo = document.getElementById(idSelectTipo);
+    const selAno = document.getElementById(idSelectAno);
+    const selFase = idSelectFase ? document.getElementById(idSelectFase) : null;
+    if (!selTipo || !selAno) return;
+    const tipo = selTipo.value;
+    let anos = [];
+    if (tipo === 'FUNDAMENTAL1') {
+        anos = ['1ANO', '2ANO', '3ANO', '4ANO', '5ANO'];
+    } else if (tipo === 'FUNDAMENTAL') {
+        anos = ['6ANO', '7ANO', '8ANO', '9ANO'];
+    } else if (tipo) {
+        anos = ['1ANO', '2ANO', '3ANO'];
+    }
+    const valorAtual = selAno.value;
+    selAno.innerHTML = '<option value="">Ano...</option>';
+    anos.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a;
+        opt.textContent = textoAnoTurma(a);
+        selAno.appendChild(opt);
+    });
+    if (anos.includes(valorAtual)) {
+        selAno.value = valorAtual;
+    } else {
+        selAno.value = '';
+    }
+    if (selFase) {
+        selFase.innerHTML = '<option value="">Fase...</option>';
+    }
+}
+
 function abreviar(str, tam) {
     if (!str) return '';
     return str.length > tam ? str.slice(0, tam - 1) + '…' : str;
@@ -229,9 +315,16 @@ function migrarEstruturaLocal() {
             p.temposDisponiveis = getTempos('MANHA').filter(t => !t.intervalo).map(t => t.id);
             alterou = true;
         }
+        if (!p.baseTipo) {
+            p.baseTipo = 'TECNICA';
+            alterou = true;
+        }
     });
     turmas.forEach(t => {
         if (!t.turno || !['MANHA','TARDE','NOITE'].includes(t.turno)) { t.turno = 'MANHA'; alterou = true; }
+        if (!t.tipoTurma) { t.tipoTurma = ''; alterou = true; }
+        if (!t.anoTurma) { t.anoTurma = ''; alterou = true; }
+        if (!t.faseTurma) { t.faseTurma = ''; alterou = true; }
     });
     aulas.forEach(a => {
         if (!a.turno || !['MANHA','TARDE','NOITE'].includes(a.turno)) { a.turno = 'MANHA'; alterou = true; }
@@ -524,6 +617,11 @@ function atualizarListaProfessores() {
         tdDisc.textContent = p.disciplinas.join(', ');
         tr.appendChild(tdDisc);
 
+        const tdBase = document.createElement('td');
+        const base = p.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
+        tdBase.textContent = base;
+        tr.appendChild(tdBase);
+
         const tdCor = document.createElement('td');
         const box = document.createElement('div');
         box.style.width = '26px';
@@ -558,7 +656,7 @@ function atualizarListaProfessores() {
         trEdit.id = `editProfRow-${p.id}`;
         trEdit.style.display = 'none';
         const tdEdit = document.createElement('td');
-        tdEdit.colSpan = 4;
+        tdEdit.colSpan = 5;
         const disciplinasGlobais = Array.from(new Set(professores.flatMap(px => px.disciplinas))).filter(Boolean);
         const optionsDisc = disciplinasGlobais.map(d => `<option value="${d}" ${p.disciplinas.includes(d) ? 'selected' : ''}>${d}</option>`).join('');
         tdEdit.innerHTML = `
@@ -644,6 +742,7 @@ function salvarProfessor(e) {
     const nome = document.getElementById('nomeProfessor').value.trim();
     const disciplinasStr = document.getElementById('disciplinasProfessor').value;
     const cor = document.getElementById('corProfessor').value || '#3498db';
+    const baseProfessor = document.getElementById('baseProfessor').value || 'TECNICA';
     const dispDiaTurno = coletarDisponibilidade('dispProfessor');
     const temposDiaTurno = coletarTemposDisponibilidade('dispProfessor');
     const diasDisponiveis = Object.keys(dispDiaTurno).filter(d => (dispDiaTurno[d] || []).length > 0);
@@ -687,6 +786,7 @@ function salvarProfessor(e) {
                 nome,
                 disciplinas,
                 cor,
+                baseTipo: baseProfessor,
                 diasDisponiveis,
                 turnosDisponiveis,
                 disponibilidadePorDia: dispDiaTurno,
@@ -726,6 +826,7 @@ function salvarProfessor(e) {
             p.nome = novoProf.nome;
             p.disciplinas = novoProf.disciplinas;
             p.cor = novoProf.cor;
+            p.baseTipo = novoProf.baseTipo;
             p.diasDisponiveis = novoProf.diasDisponiveis;
             p.turnosDisponiveis = novoProf.turnosDisponiveis;
             p.disponibilidadePorDia = novoProf.disponibilidadePorDia;
@@ -739,6 +840,7 @@ function salvarProfessor(e) {
             nome,
             disciplinas,
             cor,
+            baseTipo: baseProfessor,
             diasDisponiveis,
             turnosDisponiveis,
             disponibilidadePorDia: dispDiaTurno,
@@ -761,6 +863,18 @@ function editarProfessor(id) {
     document.getElementById('nomeProfessor').value = p.nome;
     document.getElementById('disciplinasProfessor').value = p.disciplinas.join(', ');
     document.getElementById('corProfessor').value = p.cor;
+    const baseValor = p.baseTipo || 'TECNICA';
+    const hiddenBase = document.getElementById('baseProfessor');
+    if (hiddenBase) hiddenBase.value = baseValor;
+    const groupBase = document.getElementById('chips-base-prof');
+    if (groupBase) {
+        const btnSelecionado = Array.from(groupBase.querySelectorAll('.chip'))
+            .find(b => b.getAttribute('data-value') === baseValor);
+        groupBase.querySelectorAll('.chip').forEach(c => c.classList.remove('selecionado'));
+        if (btnSelecionado) {
+            btnSelecionado.classList.add('selecionado');
+        }
+    }
     renderDisponibilidade('dispProfessor', p.disponibilidadePorDia || null, (p.diasDisponiveis || []), (p.turnosDisponiveis || []), p.temposPorDiaTurno || null);
 }
 
@@ -838,6 +952,10 @@ function preencherSelectCursos() {
     const sel = document.getElementById('cursoTurma');
     if (!sel) return;
     sel.innerHTML = '';
+    const optNa = document.createElement('option');
+    optNa.value = 'Não se aplica';
+    optNa.textContent = 'Não se aplica';
+    sel.appendChild(optNa);
     cursos.forEach(curso => {
         const opt = document.createElement('option');
         opt.value = curso;
@@ -850,13 +968,17 @@ function preencherSelectCursoVisual() {
     const sel = document.getElementById('cursoVisual');
     if (!sel) return;
     sel.innerHTML = '<option value="">Todos os cursos</option>';
+    const optNa = document.createElement('option');
+    optNa.value = 'Não se aplica';
+    optNa.textContent = 'Não se aplica';
+    sel.appendChild(optNa);
     cursos.forEach(curso => {
         const opt = document.createElement('option');
         opt.value = curso;
         opt.textContent = curso;
         sel.appendChild(opt);
     });
-    if (cursoVisualGrade && cursos.includes(cursoVisualGrade)) {
+    if (cursoVisualGrade && (cursos.includes(cursoVisualGrade) || cursoVisualGrade === 'Não se aplica')) {
         sel.value = cursoVisualGrade;
     }
 }
@@ -892,7 +1014,7 @@ function excluirCursoSelecionado() {
     const sel = document.getElementById('cursoTurma');
     const cursoParaExcluir = sel.value;
 
-    if (!cursoParaExcluir) {
+    if (!cursoParaExcluir || cursoParaExcluir === 'Não se aplica') {
         mostrarToast('Selecione um curso para excluir.', 'warning');
         return;
     }
@@ -944,6 +1066,17 @@ function atualizarListaTurmas() {
         tdTurno.textContent = textoTurno(t.turno);
         tr.appendChild(tdTurno);
 
+        const tdInfo = document.createElement('td');
+        const tipoTxt = textoTipoTurma(t.tipoTurma);
+        const anoTxt = textoAnoTurma(t.anoTurma);
+        const faseTxt = textoFaseTurma(t.faseTurma);
+        const partes = [];
+        if (tipoTxt) partes.push(tipoTxt);
+        if (anoTxt) partes.push(anoTxt);
+        if (faseTxt) partes.push(faseTxt);
+        tdInfo.textContent = partes.length ? partes.join(' — ') : '-';
+        tr.appendChild(tdInfo);
+
         const tdAcoes = document.createElement('td');
         tdAcoes.style.display = 'flex';
         tdAcoes.style.gap = '6px';
@@ -951,7 +1084,7 @@ function atualizarListaTurmas() {
         const btnEd = document.createElement('button');
         btnEd.className = 'btn-secondary small';
         btnEd.textContent = 'Editar';
-        btnEd.onclick = () => toggleEdicaoTurmaInline(t.id);
+        btnEd.onclick = () => abrirModalTurma(t.id);
 
         const btnDel = document.createElement('button');
         btnDel.className = 'btn-danger small';
@@ -976,7 +1109,7 @@ function atualizarListaTurmas() {
         trEdit.id = `editRow-${t.id}`;
         trEdit.style.display = 'none';
         const tdEdit = document.createElement('td');
-        tdEdit.colSpan = 5;
+        tdEdit.colSpan = 6;
         const turnosOpts = TURNOS.map(tt => `<option value="${tt}" ${tt === t.turno ? 'selected' : ''}>${textoTurno(tt)}</option>`).join('');
         const cursosOpts = cursos.map(c => `<option value="${c}" ${c === t.curso ? 'selected' : ''}>${c}</option>`).join('');
         tdEdit.innerHTML = `
@@ -1018,10 +1151,13 @@ function salvarTurma(e) {
     const nome = document.getElementById('nomeTurma').value.trim();
     const curso = document.getElementById('cursoTurma').value;
     const turno = document.getElementById('turnoTurma').value;
+    const tipo = document.getElementById('tipoTurma').value;
+    const ano = document.getElementById('anoTurma').value;
+    const fase = document.getElementById('faseTurma').value;
     const descricao = document.getElementById('descricaoTurma').value.trim();
 
-    if (!nome || !curso || !turno) {
-        mostrarToast('Preencha nome, curso e turno.', 'warning');
+    if (!nome || !curso || !turno || !tipo || !ano) {
+        mostrarToast('Preencha nome, curso, turno, tipo e ano.', 'warning');
         return;
     }
 
@@ -1031,6 +1167,9 @@ function salvarTurma(e) {
             t.nome = nome;
             t.curso = curso;
             t.turno = turno;
+            t.tipoTurma = tipo;
+            t.anoTurma = ano;
+            t.faseTurma = fase;
             t.descricao = descricao;
             mostrarToast('Turma atualizada com sucesso!');
         }
@@ -1040,6 +1179,9 @@ function salvarTurma(e) {
             nome,
             curso,
             turno,
+            tipoTurma: tipo,
+            anoTurma: ano,
+            faseTurma: fase,
             descricao
         });
         mostrarToast('Turma cadastrada com sucesso!');
@@ -1050,6 +1192,12 @@ function salvarTurma(e) {
     document.getElementById('formTurma').reset();
     document.getElementById('turmaId').value = '';
     document.getElementById('turnoTurma').value = '';
+    document.getElementById('tipoTurma').value = '';
+    document.getElementById('anoTurma').value = '';
+    const faseSel = document.getElementById('faseTurma');
+    if (faseSel) {
+        faseSel.innerHTML = '<option value="">Fase...</option>';
+    }
     document.querySelectorAll('#chips-turno-turma .chip').forEach(c => c.classList.remove('selecionado'));
 }
 
@@ -1060,6 +1208,20 @@ function editarTurma(id) {
     document.getElementById('nomeTurma').value = t.nome;
     document.getElementById('cursoTurma').value = t.curso;
     document.getElementById('turnoTurma').value = t.turno;
+    const tipoSel = document.getElementById('tipoTurma');
+    if (tipoSel) {
+        tipoSel.value = t.tipoTurma || '';
+        atualizarOpcoesAnoTurma('tipoTurma', 'anoTurma', 'faseTurma');
+    }
+    const anoSel = document.getElementById('anoTurma');
+    if (anoSel) {
+        anoSel.value = t.anoTurma || '';
+        atualizarOpcoesFaseTurma('anoTurma', 'faseTurma');
+        const faseSel = document.getElementById('faseTurma');
+        if (faseSel) {
+            faseSel.value = t.faseTurma || '';
+        }
+    }
     document.getElementById('descricaoTurma').value = t.descricao || '';
 
     document.querySelectorAll('#chips-turno-turma .chip').forEach(c => {
@@ -1111,6 +1273,85 @@ function salvarEdicaoTurmaInline(id) {
     t.descricao = descricao;
     salvarLocal();
     atualizarListaTurmas();
+    mostrarToast('Turma atualizada com sucesso!');
+}
+
+function abrirModalTurma(id) {
+    const t = turmas.find(x => x.id === id);
+    if (!t) return;
+    const modal = document.getElementById('modalTurma');
+    if (!modal) return;
+    const inpId = document.getElementById('modalTurmaId');
+    const inpNome = document.getElementById('modalTurmaNome');
+    const selCurso = document.getElementById('modalTurmaCurso');
+    const hiddenTurno = document.getElementById('modalTurmaTurno');
+    const selTipo = document.getElementById('modalTipoTurma');
+    const selAno = document.getElementById('modalAnoTurma');
+    const selFase = document.getElementById('modalFaseTurma');
+    const inpDesc = document.getElementById('modalTurmaDescricao');
+    if (!inpId || !inpNome || !selCurso || !hiddenTurno || !inpDesc || !selTipo || !selAno || !selFase) return;
+    inpId.value = t.id;
+    inpNome.value = t.nome;
+    selCurso.innerHTML = '';
+    const optNa = document.createElement('option');
+    optNa.value = 'Não se aplica';
+    optNa.textContent = 'Não se aplica';
+    selCurso.appendChild(optNa);
+    cursos.forEach(c => {
+        const opt = document.createElement('option');
+        opt.value = c;
+        opt.textContent = c;
+        selCurso.appendChild(opt);
+    });
+    selCurso.value = t.curso;
+    hiddenTurno.value = t.turno;
+    const groupTurno = document.getElementById('chips-modal-turno-turma');
+    if (groupTurno) {
+        const btnSel = Array.from(groupTurno.querySelectorAll('.chip'))
+            .find(b => b.getAttribute('data-value') === t.turno);
+        groupTurno.querySelectorAll('.chip').forEach(c => c.classList.remove('selecionado'));
+        if (btnSel) btnSel.classList.add('selecionado');
+    }
+    selTipo.value = t.tipoTurma || '';
+    atualizarOpcoesAnoTurma('modalTipoTurma', 'modalAnoTurma', 'modalFaseTurma');
+    selAno.value = t.anoTurma || '';
+    atualizarOpcoesFaseTurma('modalAnoTurma', 'modalFaseTurma');
+    selFase.value = t.faseTurma || '';
+    inpDesc.value = t.descricao || '';
+    modal.style.display = 'flex';
+}
+
+function fecharModalTurma() {
+    const modal = document.getElementById('modalTurma');
+    if (modal) modal.style.display = 'none';
+}
+
+function salvarModalTurma(e) {
+    e.preventDefault();
+    const id = document.getElementById('modalTurmaId').value;
+    const t = turmas.find(x => x.id === id);
+    if (!t) return;
+    const nome = document.getElementById('modalTurmaNome').value.trim();
+    const curso = document.getElementById('modalTurmaCurso').value;
+    const turno = document.getElementById('modalTurmaTurno').value;
+    const tipo = document.getElementById('modalTipoTurma').value;
+    const ano = document.getElementById('modalAnoTurma').value;
+    const fase = document.getElementById('modalFaseTurma').value;
+    const descricao = document.getElementById('modalTurmaDescricao').value.trim();
+    if (!nome || !curso || !turno || !tipo || !ano) {
+        mostrarToast('Preencha nome, curso, turno, tipo e ano.', 'warning');
+        return;
+    }
+    t.nome = nome;
+    t.curso = curso;
+    t.turno = turno;
+    t.tipoTurma = tipo;
+    t.anoTurma = ano;
+    t.faseTurma = fase;
+    t.descricao = descricao;
+    salvarLocal();
+    atualizarListaTurmas();
+    fecharModalTurma();
     mostrarToast('Turma atualizada com sucesso!');
 }
 
@@ -1514,7 +1755,7 @@ function abrirEditorCelula(aula) {
     const tempo = getTempos(aula.turno).find(t => t.id === aula.tempoId);
 
     document.getElementById('modalAulaId').value = aula.id;
-    document.getElementById('modalTurma').value = turma ? turma.nome : '';
+    document.getElementById('modalAulaTurma').value = turma ? turma.nome : '';
     document.getElementById('modalDia').value = textoDia(aula.dia);
     document.getElementById('modalHorario').value = tempo ? `${tempo.inicio} - ${tempo.fim}` : '';
     document.getElementById('modalDisciplina').value = aula.disciplina;
@@ -1853,6 +2094,10 @@ function preencherSelectCursoRelatorio() {
     const sel = document.getElementById('cursoRelatorio');
     if (!sel) return;
     sel.innerHTML = '<option value="">Selecione...</option>';
+    const optNa = document.createElement('option');
+    optNa.value = 'Não se aplica';
+    optNa.textContent = 'Não se aplica';
+    sel.appendChild(optNa);
     cursos.forEach(curso => {
         const opt = document.createElement('option');
         opt.value = curso;
@@ -2610,14 +2855,16 @@ function gerarTabelaProfessor() {
     const horaTabela = agoraTabela.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const legendaTabela = `Pré-visualização: horário do professor ${prof.nome} — Gerado em: ${dataTabela} às ${horaTabela}`;
 
+    const baseLabel = prof.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
+
     if (!aulasProf.length && !incluirVagos) {
-        if (tituloEl) tituloEl.textContent = legendaTabela;
-        corpo.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;">Nenhum horário lançado para este professor.</td></tr>';
+        if (tituloEl) tituloEl.textContent = `${legendaTabela} — ${baseLabel}`;
+        corpo.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;">Nenhum horário lançado para este professor.</td></tr>';
         return;
     }
 
     if (tituloEl) {
-        tituloEl.textContent = legendaTabela;
+        tituloEl.textContent = `${legendaTabela} — ${baseLabel}`;
     }
 
     const carga = calcularCargaHorariaProfessor(aulasProf);
@@ -2723,9 +2970,11 @@ function gerarTabelaProfessor() {
             tdTempo.textContent = tempo ? tempo.etiqueta : '';
             tr.appendChild(tdTempo);
             
-            // Turma
             const turmaNome = turma ? turma.nome : '';
             const isVago = !!a._vago;
+            const tipoTexto = turma ? (textoTipoTurma(turma.tipoTurma) || '-') : '';
+            const anoTexto = turma ? (textoAnoTurma(turma.anoTurma) || '-') : '';
+            const faseTexto = turma ? (textoFaseTurma(turma.faseTurma) || '-') : '';
             if (!isVago) {
                 const prevTurmaNome = idx === 0 ? null : (turmas.find(t => t.id === aulasGrupo[idx - 1].turmaId)?.nome || '');
                 const isInicioRunTurma = idx === 0 || turmaNome !== prevTurmaNome;
@@ -2743,11 +2992,35 @@ function gerarTabelaProfessor() {
                     tdTurma.rowSpan = spanTurma;
                     tdTurma.style.verticalAlign = 'middle';
                     tr.appendChild(tdTurma);
+                    const tdTipo = document.createElement('td');
+                    tdTipo.textContent = tipoTexto;
+                    tdTipo.rowSpan = spanTurma;
+                    tdTipo.style.verticalAlign = 'middle';
+                    tr.appendChild(tdTipo);
+                    const tdAno = document.createElement('td');
+                    tdAno.textContent = anoTexto;
+                    tdAno.rowSpan = spanTurma;
+                    tdAno.style.verticalAlign = 'middle';
+                    tr.appendChild(tdAno);
+                    const tdFase = document.createElement('td');
+                    tdFase.textContent = faseTexto;
+                    tdFase.rowSpan = spanTurma;
+                    tdFase.style.verticalAlign = 'middle';
+                    tr.appendChild(tdFase);
                 }
             } else {
                 const tdTurma = document.createElement('td');
                 tdTurma.textContent = 'Escola';
                 tr.appendChild(tdTurma);
+                const tdTipo = document.createElement('td');
+                tdTipo.textContent = '';
+                tr.appendChild(tdTipo);
+                const tdAno = document.createElement('td');
+                tdAno.textContent = '';
+                tr.appendChild(tdAno);
+                const tdFase = document.createElement('td');
+                tdFase.textContent = '';
+                tr.appendChild(tdFase);
             }
             
             // Disciplina
@@ -2773,20 +3046,19 @@ function gerarTabelaProfessor() {
             corpo.appendChild(tr);
         });
         
-        // Adiciona linha de separação entre grupos (exceto no último)
         if (grupoIndex < chavesOrdenadas.length - 1) {
             const trSeparador = document.createElement('tr');
-            trSeparador.innerHTML = '<td colspan="6" style="background:#f5f5f5;height:1px;padding:0;"></td>';
+            trSeparador.innerHTML = '<td colspan="9" style="background:#f5f5f5;height:1px;padding:0;"></td>';
             corpo.appendChild(trSeparador);
         }
     });
 
     const trResumo = document.createElement('tr');
     const tdLabel = document.createElement('td');
-    tdLabel.colSpan = 3;
+    tdLabel.colSpan = 4;
     tdLabel.textContent = 'Total de tempos na semana';
     const tdValor = document.createElement('td');
-    tdValor.colSpan = 3;
+    tdValor.colSpan = 5;
     tdValor.textContent = `${carga.temposSemana} tempos (${carga.horasSemana}h semanais, aproximadamente ${carga.horasMes}h mensais)`;
     trResumo.appendChild(tdLabel);
     trResumo.appendChild(tdValor);
@@ -2798,10 +3070,10 @@ function gerarTabelaProfessor() {
         const horasVagoMes = horasVagoSemana * 5;
         const trVagos = document.createElement('tr');
         const tdLabelV = document.createElement('td');
-        tdLabelV.colSpan = 3;
+        tdLabelV.colSpan = 4;
         tdLabelV.textContent = 'Tempo vago na escola (entre aulas)';
         const tdValorV = document.createElement('td');
-        tdValorV.colSpan = 3;
+        tdValorV.colSpan = 5;
         tdValorV.textContent = `${totalVagos} tempos (${horasVagoSemana}h semanais, aproximadamente ${horasVagoMes}h mensais)`;
         trVagos.appendChild(tdLabelV);
         trVagos.appendChild(tdValorV);
@@ -2850,6 +3122,45 @@ function calcularCargaHorariaProfessor(aulasProf) {
     const horasSemana = temposSemana;
     const horasMes = temposSemana * 5;
     return { temposSemana, horasSemana, horasMes };
+}
+
+function calcularTemposVagosProfessor(aulasProf, prof) {
+    if (!aulasProf || !aulasProf.length) return { vagosSemana: 0, vagosMes: 0 };
+    const temposPorDiaTurno = {};
+    aulasProf.forEach(a => {
+        const key = `${a.dia}_${a.turno}`;
+        if (!temposPorDiaTurno[key]) temposPorDiaTurno[key] = new Set();
+        temposPorDiaTurno[key].add(a.tempoId);
+    });
+    let totalVagos = 0;
+    Object.keys(temposPorDiaTurno).forEach(key => {
+        const [dia, turno] = key.split('_');
+        const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+        const usados = temposPorDiaTurno[key];
+        if (!usados || !usados.size) return;
+        const usadosOrdenados = Array.from(usados).sort((a, b) => a - b);
+        const minId = usadosOrdenados[0];
+        const maxId = usadosOrdenados[usadosOrdenados.length - 1];
+        temposTurno.forEach(t => {
+            if (t.id >= minId && t.id <= maxId && !usados.has(t.id)) {
+                if (prof && !professorDisponivelNoHorario(prof, turno, dia, t.id)) return;
+                totalVagos++;
+            }
+        });
+    });
+    return { vagosSemana: totalVagos, vagosMes: totalVagos * 5 };
+}
+
+function contarDiasDisponiveisProfessor(prof) {
+    if (!prof) return 0;
+    const disp = prof.disponibilidadePorDia || null;
+    if (disp && typeof disp === 'object') {
+        const dias = Object.keys(disp).filter(dia => !!disp[dia]);
+        return dias.length;
+    }
+    const diasArr = Array.isArray(prof.diasDisponiveis) ? prof.diasDisponiveis : [];
+    const diasValidos = diasArr.filter(d => DIAS_SEMANA.includes(d));
+    return new Set(diasValidos).size;
 }
 
 function limparGraficosProfessor() {
@@ -3141,7 +3452,8 @@ function gerarRelatorioProfessorPDF() {
         format: 'a4'
     });
 
-    const titulo = `HORÁRIO DO PROFESSOR - ${prof.nome.toUpperCase()}`;
+    const baseLabelProf = prof.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
+    const titulo = `HORÁRIO DO PROFESSOR - ${prof.nome.toUpperCase()} (${baseLabelProf})`;
     doc.setFontSize(10);
     doc.setFont(undefined, 'bold');
     doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 26, {
@@ -3149,7 +3461,7 @@ function gerarRelatorioProfessorPDF() {
         maxWidth: doc.internal.pageSize.getWidth() - 20
     });
 
-    const head = [['Dia', 'Turno', 'Horário', 'Tempo', 'Turma', 'Disciplina']];
+    const head = [['Dia', 'Turno', 'Horário', 'Tempo', 'Turma', 'Tipo', 'Ano', 'Fase', 'Disciplina']];
     const body = [];
     const sepRows = new Set();
     let bodyRowIndex = 0;
@@ -3166,8 +3478,14 @@ function gerarRelatorioProfessorPDF() {
             const tempo = getTempos(turno).find(t => t.id === a.tempoId);
 
             const turmaNome = turma ? turma.nome : '';
+            const tipoTexto = turma ? (textoTipoTurma(turma.tipoTurma) || '-') : '';
+            const anoTexto = turma ? (textoAnoTurma(turma.anoTurma) || '-') : '';
+            const faseTexto = turma ? (textoFaseTurma(turma.faseTurma) || '-') : '';
             const isVago = !!a._vago;
             let turmaCell;
+            let tipoCell;
+            let anoCell;
+            let faseCell;
             if (isVago) {
                 const prevIsVago = idx === 0 ? false : !!aulasGrupo[idx - 1]._vago;
                 const isInicioRunEscola = idx === 0 || !prevIsVago;
@@ -3179,8 +3497,14 @@ function gerarRelatorioProfessorPDF() {
                         else break;
                     }
                     turmaCell = { content: 'Escola', rowSpan: spanEscola, styles: { valign: 'middle' } };
+                    tipoCell = { content: '', rowSpan: spanEscola, styles: { valign: 'middle' } };
+                    anoCell = { content: '', rowSpan: spanEscola, styles: { valign: 'middle' } };
+                    faseCell = { content: '', rowSpan: spanEscola, styles: { valign: 'middle' } };
                 } else {
                     turmaCell = '';
+                    tipoCell = '';
+                    anoCell = '';
+                    faseCell = '';
                 }
             } else {
                 const prevTurmaNome = idx === 0 ? null : (turmas.find(t => t.id === aulasGrupo[idx - 1].turmaId)?.nome || '');
@@ -3195,8 +3519,14 @@ function gerarRelatorioProfessorPDF() {
                         else break;
                     }
                     turmaCell = { content: turmaNome, rowSpan: spanTurma, styles: { valign: 'middle' } };
+                    tipoCell = { content: tipoTexto, rowSpan: spanTurma, styles: { valign: 'middle' } };
+                    anoCell = { content: anoTexto, rowSpan: spanTurma, styles: { valign: 'middle' } };
+                    faseCell = { content: faseTexto, rowSpan: spanTurma, styles: { valign: 'middle' } };
                 } else {
                     turmaCell = '';
+                    tipoCell = '';
+                    anoCell = '';
+                    faseCell = '';
                 }
             }
 
@@ -3245,6 +3575,9 @@ function gerarRelatorioProfessorPDF() {
                 tempo ? `${tempo.inicio} - ${tempo.fim}` : '',
                 tempo ? tempo.etiqueta : '',
                 turmaCell,
+                tipoCell,
+                anoCell,
+                faseCell,
                 discCell
             ];
             
@@ -3267,18 +3600,17 @@ function gerarRelatorioProfessorPDF() {
                 ? prof.disciplinas.join(', ')
                 : 'Não informado'));
 
+    const baseLabelPdf = prof.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
+
     doc.setFontSize(8);
     doc.setFont(undefined, 'normal');
-    doc.text(
-        `Disciplinas: ${disciplinasLabel}`,
-        14,
-        30
-    );
+    doc.text(`Base: ${baseLabelPdf}`, 14, 30);
+    doc.text(`Disciplinas: ${disciplinasLabel}`, 14, 34);
 
     doc.autoTable({
         head,
         body,
-        startY: 34,
+        startY: 36,
         theme: 'grid',
         styles: {
             fontSize: 9,
@@ -3298,12 +3630,15 @@ function gerarRelatorioProfessorPDF() {
             valign: 'middle'
         },
         columnStyles: {
-            0: { cellWidth: 12, cellPadding: 0 },  // Dia
-            1: { cellWidth: 12, cellPadding: 0 },  // Turno
-            2: { cellWidth: 32, cellPadding: 1 },  // Horário
-            3: { cellWidth: 26, cellPadding: 1 },  // Tempo
-            4: { cellWidth: 30 },                  // Turma
-            5: { cellWidth: 40, cellPadding: 1 }   // Disciplina (mais estreita, mas ainda confortável)
+            0: { cellWidth: 8, cellPadding: 0 },
+            1: { cellWidth: 10, cellPadding: 0 },
+            2: { cellWidth: 24, cellPadding: 1 },
+            3: { cellWidth: 16, cellPadding: 1 },
+            4: { cellWidth: 22 },
+            5: { cellWidth: 18 },
+            6: { cellWidth: 12 },
+            7: { cellWidth: 12 },
+            8: { cellWidth: 30, cellPadding: 1 }
         },
         didParseCell: function(data) {
             if (!data || !data.cell) return;
@@ -3320,7 +3655,7 @@ function gerarRelatorioProfessorPDF() {
                 if (colIdx === 0) {
                     data.cell.styles.fontSize = 8;
                 }
-                if (colIdx === 5) {
+                if (colIdx === 8) {
                     data.cell.styles.fontSize = 8;
                 }
             }
@@ -3592,6 +3927,7 @@ function hexToRgb(hex) {
 
 function gerarConsulta() {
     const tipo = document.getElementById('tipoConsulta').value;
+    const filtroBase = document.getElementById('filtroBaseProfessor')?.value || '';
     const thead = document.querySelector('#tabelaConsulta thead');
     const tbody = document.querySelector('#tabelaConsulta tbody');
     if (!thead || !tbody) return;
@@ -3605,10 +3941,19 @@ function gerarConsulta() {
                 <th>Disciplinas</th>
                 <th>Total de Aulas</th>
                 <th>Turnos Atuantes</th>
+                <th>CH mensal (h)</th>
+                <th>CH em janelas (h/mês)</th>
+                <th>Dias atuantes</th>
+                <th>Dias disponíveis</th>
+                <th>Nº turmas</th>
+                <th>Nº disciplinas</th>
             </tr>
         `;
         
         professores.forEach(p => {
+            if (filtroBase && (p.baseTipo || 'TECNICA') !== filtroBase) {
+                return;
+            }
             const aulasProfessor = aulas.filter(a => a.professorId === p.id);
             const turnos = [...new Set(aulasProfessor.map(a => a.turno))];
             const disciplinasUsadas = [...new Set(
@@ -3616,6 +3961,15 @@ function gerarConsulta() {
                     .map(a => a.disciplina)
                     .filter(Boolean)
             )];
+            const carga = calcularCargaHorariaProfessor(aulasProfessor);
+            const temposVagos = calcularTemposVagosProfessor(aulasProfessor, p);
+            const diasAtuantes = new Set(aulasProfessor.map(a => a.dia)).size;
+            const diasDisponiveis = contarDiasDisponiveisProfessor(p);
+            const turmasAtuantes = new Set(aulasProfessor.map(a => a.turmaId).filter(Boolean)).size;
+            let numDisciplinas = disciplinasUsadas.length;
+            if (!numDisciplinas && Array.isArray(p.disciplinas)) {
+                numDisciplinas = new Set(p.disciplinas.filter(Boolean)).size;
+            }
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -3623,6 +3977,12 @@ function gerarConsulta() {
                 <td>${disciplinasUsadas.join(', ') || '-'}</td>
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${aulasProfessor.length}</span></td>
                 <td>${turnos.map(t => textoTurno(t)).join(', ') || '-'}</td>
+                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${carga.horasMes}</span></td>
+                <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${temposVagos.vagosMes}</span></td>
+                <td>${diasAtuantes}</td>
+                <td>${diasDisponiveis}</td>
+                <td>${turmasAtuantes}</td>
+                <td>${numDisciplinas}</td>
             `;
             tbody.appendChild(tr);
         });
@@ -3633,7 +3993,11 @@ function gerarConsulta() {
                 <th>Curso / Área</th>
                 <th>Turno</th>
                 <th>Turma</th>
+                <th>Tipo da turma</th>
+                <th>Ano</th>
+                <th>Fase</th>
                 <th>Descrição</th>
+                <th>Nº Professores</th>
                 <th>Total de Aulas</th>
             </tr>
         `;
@@ -3654,7 +4018,7 @@ function gerarConsulta() {
             const trHeader = document.createElement('tr');
             trHeader.className = 'curso-group-header';
             trHeader.innerHTML = `
-                <td colspan="5" style="background-color:#e0e0e0; font-weight:bold; padding:8px;">
+                <td colspan="9" style="background-color:#e0e0e0; font-weight:bold; padding:8px;">
                     ${curso} <span style="font-weight:normal; font-size:0.9em;">(${turmasCurso.length} turmas)</span>
                 </td>
             `;
@@ -3671,7 +4035,9 @@ function gerarConsulta() {
                 const turmasDoTurno = turmasPorTurno[turno];
                 
                 turmasDoTurno.forEach((t, idx) => {
-                    const totalAulas = aulas.filter(a => a.turmaId === t.id).length;
+                    const aulasTurma = aulas.filter(a => a.turmaId === t.id);
+                    const totalAulas = aulasTurma.length;
+                    const profsTurma = new Set(aulasTurma.map(a => a.professorId).filter(Boolean)).size;
                     const tr = document.createElement('tr');
                     
                     // Coluna Curso (vazia pois já tem cabeçalho, ou merged se preferir layout tabela pura)
@@ -3697,12 +4063,27 @@ function gerarConsulta() {
                     tdTurma.innerHTML = `<strong>${t.nome}</strong>`;
                     tr.appendChild(tdTurma);
 
+                    const tdTipo = document.createElement('td');
+                    tdTipo.textContent = textoTipoTurma(t.tipoTurma) || '-';
+                    tr.appendChild(tdTipo);
+
+                    const tdAno = document.createElement('td');
+                    tdAno.textContent = textoAnoTurma(t.anoTurma) || '-';
+                    tr.appendChild(tdAno);
+
+                    const tdFase = document.createElement('td');
+                    tdFase.textContent = textoFaseTurma(t.faseTurma) || '-';
+                    tr.appendChild(tdFase);
+
                     // Descrição
                     const tdDesc = document.createElement('td');
                     tdDesc.textContent = t.descricao || '-';
                     tr.appendChild(tdDesc);
 
-                    // Total
+                    const tdProfs = document.createElement('td');
+                    tdProfs.innerHTML = `<span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${profsTurma}</span>`;
+                    tr.appendChild(tdProfs);
+
                     const tdTotal = document.createElement('td');
                     tdTotal.innerHTML = `<span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${totalAulas}</span>`;
                     tr.appendChild(tdTotal);
@@ -3713,7 +4094,7 @@ function gerarConsulta() {
             
             // Espaço entre cursos
             const trEspaco = document.createElement('tr');
-            trEspaco.innerHTML = '<td colspan="5" style="height:10px; border:none;"></td>';
+            trEspaco.innerHTML = '<td colspan="9" style="height:10px; border:none;"></td>';
             tbody.appendChild(trEspaco);
         });
     } 
@@ -3723,6 +4104,7 @@ function gerarConsulta() {
                 <th>Turno</th>
                 <th>Quantidade de Turmas</th>
                 <th>Total de Aulas</th>
+                <th>Nº Professores</th>
                 <th>Cursos Presentes</th>
             </tr>
         `;
@@ -3730,7 +4112,9 @@ function gerarConsulta() {
         TURNOS.forEach(turno => {
             const turmasTurno = turmas.filter(t => t.turno === turno);
             const idsTurmas = turmasTurno.map(t => t.id);
-            const totalAulas = aulas.filter(a => idsTurmas.includes(a.turmaId)).length;
+            const aulasTurno = aulas.filter(a => idsTurmas.includes(a.turmaId));
+            const totalAulas = aulasTurno.length;
+            const profsTurno = new Set(aulasTurno.map(a => a.professorId).filter(Boolean)).size;
             const cursosTurno = [...new Set(turmasTurno.map(t => t.curso))];
             
             const tr = document.createElement('tr');
@@ -3738,6 +4122,7 @@ function gerarConsulta() {
                 <td><strong>${textoTurno(turno)}</strong></td>
                 <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${turmasTurno.length}</span></td>
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${totalAulas}</span></td>
+                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${profsTurno}</span></td>
                 <td>${cursosTurno.join(', ') || '-'}</td>
             `;
             tbody.appendChild(tr);
@@ -3751,6 +4136,7 @@ function gerarConsulta() {
                 <th>Turmas Vespertinas</th>
                 <th>Turmas Noturnas</th>
                 <th>Total de Turmas</th>
+                <th>Nº Professores</th>
                 <th>Total de Aulas</th>
             </tr>
         `;
@@ -3761,7 +4147,9 @@ function gerarConsulta() {
             const turmasTarde = turmasCurso.filter(t => t.turno === 'TARDE').length;
             const turmasNoite = turmasCurso.filter(t => t.turno === 'NOITE').length;
             const idsTurmas = turmasCurso.map(t => t.id);
-            const totalAulas = aulas.filter(a => idsTurmas.includes(a.turmaId)).length;
+            const aulasCurso = aulas.filter(a => idsTurmas.includes(a.turmaId));
+            const totalAulas = aulasCurso.length;
+            const profsCurso = new Set(aulasCurso.map(a => a.professorId).filter(Boolean)).size;
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
@@ -3770,6 +4158,7 @@ function gerarConsulta() {
                 <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${turmasTarde}</span></td>
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;background:#2c3e50;color:white;">${turmasNoite}</span></td>
                 <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${turmasCurso.length}</span></td>
+                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${profsCurso}</span></td>
                 <td><span style="background:#d4edda;padding:2px 8px;border-radius:12px;font-weight:bold;">${totalAulas}</span></td>
             `;
             tbody.appendChild(tr);
@@ -4001,6 +4390,18 @@ function abrirModalProfessor(id) {
     document.getElementById('modalProfNome').value = p.nome;
     document.getElementById('modalProfDisciplinas').value = p.disciplinas.join(', ');
     document.getElementById('modalProfCor').value = p.cor || '#3498db';
+    const baseValor = p.baseTipo || 'TECNICA';
+    const hiddenBase = document.getElementById('modalBaseProfessor');
+    if (hiddenBase) hiddenBase.value = baseValor;
+    const groupBase = document.getElementById('chips-modal-base-prof');
+    if (groupBase) {
+        const btnSelecionado = Array.from(groupBase.querySelectorAll('.chip'))
+            .find(b => b.getAttribute('data-value') === baseValor);
+        groupBase.querySelectorAll('.chip').forEach(c => c.classList.remove('selecionado'));
+        if (btnSelecionado) {
+            btnSelecionado.classList.add('selecionado');
+        }
+    }
     const diasSel = p.diasDisponiveis || [];
     const turnosSel = p.turnosDisponiveis || [];
     const dispCont = document.getElementById('modalDispProfessor');
@@ -4023,6 +4424,7 @@ function salvarModalProfessor(e) {
     const nome = document.getElementById('modalProfNome').value.trim();
     const discsStr = document.getElementById('modalProfDisciplinas').value;
     const cor = document.getElementById('modalProfCor').value || '#3498db';
+    const baseValor = document.getElementById('modalBaseProfessor')?.value || 'TECNICA';
     if (!nome) {
         mostrarToast('Informe o nome do professor.', 'warning');
         return;
@@ -4060,6 +4462,7 @@ function salvarModalProfessor(e) {
         nome,
         disciplinas: p.disciplinas,
         cor,
+        baseTipo: baseValor,
         diasDisponiveis: dias,
         turnosDisponiveis: turnos,
         disponibilidadePorDia: dispDiaTurno,
@@ -4099,6 +4502,7 @@ function salvarModalProfessor(e) {
     p.nome = novoProf.nome;
     p.disciplinas = novoProf.disciplinas;
     p.cor = novoProf.cor;
+    p.baseTipo = novoProf.baseTipo;
     p.diasDisponiveis = novoProf.diasDisponiveis;
     p.turnosDisponiveis = novoProf.turnosDisponiveis;
     p.disponibilidadePorDia = novoProf.disponibilidadePorDia;
@@ -4119,6 +4523,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (modalProf) {
         modalProf.addEventListener('click', (e) => {
             if (e.target === modalProf) fecharModalProfessor();
+        });
+    }
+    const formModalTurma = document.getElementById('formModalTurma');
+    if (formModalTurma) {
+        formModalTurma.addEventListener('submit', salvarModalTurma);
+    }
+    const modalTurma = document.getElementById('modalTurma');
+    if (modalTurma) {
+        modalTurma.addEventListener('click', (e) => {
+            if (e.target === modalTurma) fecharModalTurma();
         });
     }
 });

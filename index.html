@@ -125,6 +125,16 @@
                             <label for="corProfessor">Cor de identificação:</label>
                             <input type="color" id="corProfessor" value="#3498db">
                         </div>
+                        <div class="form-group">
+                            <label>Base do professor:</label>
+                            <div class="chips-group" id="chips-base-prof">
+                                <button type="button" class="chip" data-value="TECNICA"
+                                        onclick="selecionarChip('chips-base-prof','baseProfessor',this)">Base Técnica</button>
+                                <button type="button" class="chip" data-value="COMUM"
+                                        onclick="selecionarChip('chips-base-prof','baseProfessor',this)">Base Comum</button>
+                            </div>
+                            <input type="hidden" id="baseProfessor">
+                        </div>
                         <div class="form-group full-row">
                             <label>Disponibilidade por dia/turno:</label>
                             <div id="dispProfessor" class="disp-grid"></div>
@@ -144,6 +154,7 @@
                         <tr>
                             <th>Nome</th>
                             <th>Disciplinas</th>
+                            <th>Base</th>
                             <th>Cor</th>
                             <th>Ações</th>
                         </tr>
@@ -186,6 +197,28 @@
                             <input type="hidden" id="turnoTurma" required>
                         </div>
                         <div class="form-group">
+                            <label for="tipoTurma">Tipo da turma:</label>
+                            <select id="tipoTurma" required onchange="atualizarOpcoesAnoTurma('tipoTurma','anoTurma','faseTurma')">
+                                <option value="">Selecione...</option>
+                                <option value="INTEGRADO">Integrado ao Médio</option>
+                                <option value="SUBSEQUENTE">Subsequente ao Médio</option>
+                                <option value="MEDIO">Médio</option>
+                                <option value="FUNDAMENTAL1">Fundamental 1</option>
+                                <option value="FUNDAMENTAL">Fundamental 2</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="anoTurma">Ano e fase:</label>
+                            <div class="inline-group">
+                                <select id="anoTurma" required onchange="atualizarOpcoesFaseTurma('anoTurma','faseTurma')">
+                                    <option value="">Ano...</option>
+                                </select>
+                                <select id="faseTurma">
+                                    <option value="">Fase...</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="form-group">
                             <label for="descricaoTurma">Descrição (opcional):</label>
                             <div class="inline-group">
                                 <input type="text" id="descricaoTurma" placeholder="Ex.: VI Fase • 2025.2" style="flex: 1;">
@@ -204,6 +237,7 @@
                             <th>Curso / Área</th>
                             <th>Descrição</th>
                             <th>Turno</th>
+                            <th>Tipo / Ano / Fase</th>
                             <th>Ações</th>
                         </tr>
                         </thead>
@@ -590,6 +624,9 @@
                                 <th>Horário</th>
                                 <th>Tempo</th>
                                 <th>Turma</th>
+                                <th>Tipo</th>
+                                <th>Ano</th>
+                                <th>Fase</th>
                                 <th>Disciplina</th>
                             </tr>
                             </thead>
@@ -629,21 +666,25 @@
                 <div class="card">
                     <h3>Filtros de Consulta</h3>
                     <div class="form-grid">
-                        <div class="form-group full-row">
-                            <div class="inline-group" style="align-items: flex-end; width: 100%;">
-                                <div class="form-group" style="flex: 1;">
-                                    <label for="tipoConsulta">Tipo de consulta:</label>
-                                    <select id="tipoConsulta">
-                                        <option value="professores">Professores</option>
-                                        <option value="turmas">Turmas</option>
-                                        <option value="turnos">Turnos</option>
-                                        <option value="cursos">Cursos / Áreas</option>
-                                    </select>
-                                </div>
-                                <div class="form-group" style="flex: 0 0 auto; margin-top: 0;">
-                                    <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
-                                </div>
-                            </div>
+                        <div class="form-group">
+                            <label for="tipoConsulta">Tipo de consulta:</label>
+                            <select id="tipoConsulta">
+                                <option value="professores">Professores</option>
+                                <option value="turmas">Turmas</option>
+                                <option value="turnos">Turnos</option>
+                                <option value="cursos">Cursos / Áreas</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="filtroBaseProfGroup">
+                            <label for="filtroBaseProfessor">Base do professor:</label>
+                            <select id="filtroBaseProfessor">
+                                <option value="">Todas</option>
+                                <option value="TECNICA">Base Técnica</option>
+                                <option value="COMUM">Base Comum</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
                         </div>
                     </div>
                 </div>
@@ -688,7 +729,7 @@
             <input type="hidden" id="modalAulaId">
             <div class="form-group">
                 <label>Turma:</label>
-                <input type="text" id="modalTurma" readonly>
+                <input type="text" id="modalAulaTurma" readonly>
             </div>
             <div class="form-group">
                 <label>Dia:</label>
@@ -716,6 +757,66 @@
     </div>
 </div>
 
+<!-- Modal de edição de Turma -->
+<div id="modalTurma" class="modal">
+    <div class="modal-content modal-prof">
+        <h3>Editar Turma</h3>
+        <form id="formModalTurma" class="form-grid">
+            <input type="hidden" id="modalTurmaId">
+            <div class="form-group">
+                <label>Nome da Turma</label>
+                <input type="text" id="modalTurmaNome" required>
+            </div>
+            <div class="form-group">
+                <label>Curso / Área</label>
+                <select id="modalTurmaCurso"></select>
+            </div>
+            <div class="form-group">
+                <label>Turno</label>
+                <div class="chips-group" id="chips-modal-turno-turma">
+                    <button type="button" class="chip" data-value="MANHA"
+                            onclick="selecionarChip('chips-modal-turno-turma','modalTurmaTurno',this)">Manhã</button>
+                    <button type="button" class="chip" data-value="TARDE"
+                            onclick="selecionarChip('chips-modal-turno-turma','modalTurmaTurno',this)">Tarde</button>
+                            <button type="button" class="chip" data-value="NOITE"
+                                    onclick="selecionarChip('chips-modal-turno-turma','modalTurmaTurno',this)">Noite</button>
+                        </div>
+                <input type="hidden" id="modalTurmaTurno">
+            </div>
+            <div class="form-group">
+                <label for="modalTipoTurma">Tipo da turma:</label>
+                <select id="modalTipoTurma" required onchange="atualizarOpcoesAnoTurma('modalTipoTurma','modalAnoTurma','modalFaseTurma')">
+                    <option value="">Selecione...</option>
+                    <option value="INTEGRADO">Integrado ao Médio</option>
+                    <option value="SUBSEQUENTE">Subsequente ao Médio</option>
+                    <option value="MEDIO">Médio</option>
+                    <option value="FUNDAMENTAL1">Fundamental 1</option>
+                    <option value="FUNDAMENTAL">Fundamental 2</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="modalAnoTurma">Ano e fase:</label>
+                <div class="inline-group">
+                    <select id="modalAnoTurma" required onchange="atualizarOpcoesFaseTurma('modalAnoTurma','modalFaseTurma')">
+                        <option value="">Ano...</option>
+                    </select>
+                    <select id="modalFaseTurma">
+                        <option value="">Fase...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-group full-row">
+                <label>Descrição</label>
+                <input type="text" id="modalTurmaDescricao" placeholder="Ex.: VI Fase • 2025.2">
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn-secondary" onclick="fecharModalTurma()">Cancelar</button>
+                <button type="submit" class="btn-primary">Salvar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Modal de edição de Professor -->
 <div id="modalProfessorPerfil" class="modal">
     <div class="modal-content modal-prof">
@@ -733,6 +834,16 @@
             <div class="form-group">
                 <label>Cor</label>
                 <input type="color" id="modalProfCor" value="#3498db">
+            </div>
+            <div class="form-group">
+                <label>Base do professor:</label>
+                <div class="chips-group" id="chips-modal-base-prof">
+                    <button type="button" class="chip" data-value="TECNICA"
+                            onclick="selecionarChip('chips-modal-base-prof','modalBaseProfessor',this)">Base Técnica</button>
+                    <button type="button" class="chip" data-value="COMUM"
+                            onclick="selecionarChip('chips-modal-base-prof','modalBaseProfessor',this)">Base Comum</button>
+                </div>
+                <input type="hidden" id="modalBaseProfessor">
             </div>
             <div class="form-group full-row">
                 <label>Disponibilidade por dia/turno</label>
