@@ -229,6 +229,31 @@
                 </div>
 
                 <div class="card">
+                    <h3>Apelidar Disciplina (opcional)</h3>
+                    <form id="formApelidoDisciplina" class="form-grid">
+                        <div class="form-group">
+                            <label for="disciplinaApelidoSelect">Disciplina:</label>
+                            <select id="disciplinaApelidoSelect">
+                                <option value="">Selecione...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="apelidoDisciplinaInput">Apelido:</label>
+                            <div class="inline-group">
+                                <input type="text" id="apelidoDisciplinaInput" placeholder="Ex.: PORT, GER. B. DADOS" style="flex:1;">
+                                <label style="display:inline-flex; align-items:center; gap:4px;">
+                                    <input type="checkbox" id="removerApelidoDisciplinaCheckbox" onchange="toggleRemoverApelidoDisciplina(this)">
+                                    Retirar apelido
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <button type="submit" class="btn-primary">💾 Salvar Apelido</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
                     <h3>Turmas Cadastradas</h3>
                     <table class="tabela-padrao">
                         <thead>
@@ -377,10 +402,65 @@
 
                     <div class="editor-actions">
                         <button type="button" class="btn-primary" onclick="ajusteInteligente()">🧠 Ajuste Inteligente</button>
-                        <button type="button" class="btn-secondary" onclick="desfazerAjuste()">↩️ Desfazer último ajuste</button>
+                        <button type="button" class="btn-secondary" id="btnDesfazerTurno" onclick="desfazerAjuste()">↩️ Desfazer</button>
                         <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Backup</button>
                         <input type="file" id="importBackup" accept=".json" style="display: none;" onchange="importarBackup(event)">
                         <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Backup</button>
+                        <button type="button" class="btn-secondary" id="btnToggleInsercaoRapida" onclick="toggleInsercaoRapida()">
+                            💡 Inserção rápida
+                        </button>
+                    </div>
+
+                    <div class="editor-quick-insert" id="editorQuickInsert" style="margin-top: 12px; display:none;">
+                        <h3>Inserção rápida no Editor Visual</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="rapidoTurno">Turno:</label>
+                                <select id="rapidoTurno">
+                                    <option value="">Selecione...</option>
+                                    <option value="MANHA">Manhã</option>
+                                    <option value="TARDE">Tarde</option>
+                                    <option value="NOITE">Noite</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="rapidoTurma">Turma:</label>
+                                <select id="rapidoTurma">
+                                    <option value="">Selecione...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="rapidoProfessor">Professor:</label>
+                                <select id="rapidoProfessor">
+                                    <option value="">Selecione...</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="rapidoDisciplina">Disciplina:</label>
+                                <input type="text" id="rapidoDisciplina">
+                            </div>
+                            <div class="form-group">
+                                <label for="rapidoQuantidade">Nº de aulas:</label>
+                                <input type="number" id="rapidoQuantidade" min="1" value="1">
+                            </div>
+                            <div class="form-group">
+                                <button type="button" class="btn-primary" onclick="aplicarInsercaoRapidaAuto()">Aplicar</button>
+                            </div>
+                        </div>
+                        <p class="hint">
+                            Escolha turno, turma, professor, disciplina e nº de aulas e clique em Aplicar para o sistema alocar automaticamente as aulas na grade, respeitando todas as regras existentes.
+                        </p>
+                        <hr>
+                        <div class="form-grid">
+                            <div class="form-group full-row">
+                                <button type="button" class="btn-secondary" onclick="baixarModeloExcelInsercaoRapida()">📥 Baixar modelo para Excel</button>
+                                <input type="file" id="arquivoExcelInsercaoRapida" accept=".csv" style="display:none" onchange="importarExcelInsercaoRapida(event)">
+                                <button type="button" class="btn-secondary" onclick="document.getElementById('arquivoExcelInsercaoRapida').click()">📤 Importar planilha preenchida</button>
+                            </div>
+                        </div>
+                        <p class="hint">
+                            Baixe o modelo, abra e edite no Excel (arquivo CSV), preencha professor, disciplina e nº de tempos para cada turma e depois importe novamente.
+                        </p>
                     </div>
 
                     <div class="grade-container">
@@ -555,9 +635,10 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label>Curso / Área:</label>
-                            <select id="cursoRelatorio">
+                            <select id="cursoRelatorio" multiple size="4">
                                 <!-- preenchido via JS -->
                             </select>
+                            <span class="hint">Use Ctrl (ou Cmd) para selecionar vários cursos.</span>
                         </div>
                         <div class="form-group">
                             <label>Turno:</label>
@@ -628,11 +709,15 @@
                                 <th>Ano</th>
                                 <th>Fase</th>
                                 <th>Disciplina</th>
+                                <th>C.H./Disciplina</th>
+                                <th>C.H./Turno</th>
                             </tr>
                             </thead>
                             <tbody></tbody>
                         </table>
                     </div>
+                    <p id="profResumoCarga" class="hint" style="font-style: italic;"></p>
+                    <p id="profResumoVagos" class="hint" style="font-style: italic;"></p>
                     <p class="hint" id="profTempoVagoHint">
                         Os intervalos em que o professor está na escola mas sem aula aparecem como
                         <strong>Tempo vago na escola</strong>.
@@ -668,11 +753,12 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label for="tipoConsulta">Tipo de consulta:</label>
-                            <select id="tipoConsulta">
+                            <select id="tipoConsulta" onchange="onChangeTipoConsulta()">
                                 <option value="professores">Professores</option>
                                 <option value="turmas">Turmas</option>
                                 <option value="turnos">Turnos</option>
                                 <option value="cursos">Cursos / Áreas</option>
+                                <option value="disponibilidadeProfessores">Disponibilidade dos professores</option>
                             </select>
                         </div>
                         <div class="form-group" id="filtroBaseProfGroup">
@@ -683,14 +769,38 @@
                                 <option value="COMUM">Base Comum</option>
                             </select>
                         </div>
+                        <div class="form-group" id="filtroTurmaGroup">
+                            <label for="filtroTurmaConsulta">Turma:</label>
+                            <select id="filtroTurmaConsulta">
+                                <option value="">Todas as turmas</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="filtroTurnoGroup">
+                            <label for="filtroTurnoConsulta">Turno:</label>
+                            <select id="filtroTurnoConsulta">
+                                <option value="">Todos os turnos</option>
+                                <option value="MANHA">Manhã</option>
+                                <option value="TARDE">Tarde</option>
+                                <option value="NOITE">Noite</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="filtroCursoGroup">
+                            <label for="filtroCursoConsulta">Curso / Área:</label>
+                            <select id="filtroCursoConsulta">
+                                <option value="">Todos os cursos / áreas</option>
+                            </select>
+                        </div>
                         <div class="form-group">
-                            <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
+                            <div class="inline-group">
+                                <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
+                                <button class="btn-secondary" type="button" onclick="preverImpressaoConsulta()">🖨️ Pré-visualizar impressão</button>
+                            </div>
                         </div>
                     </div>
                 </div>
 
                 <div class="card">
-                    <h3>Resultado</h3>
+                    <h3 id="tituloResultadoConsulta">Resultado</h3>
                     <div class="table-wrapper">
                         <table class="tabela-padrao" id="tabelaConsulta">
                             <thead></thead>

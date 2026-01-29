@@ -458,6 +458,19 @@ button.small {
     font-weight: 700;
 }
 
+#tabelaConsulta th:first-child,
+#tabelaConsulta td:first-child {
+    text-align: center;
+}
+
+#tabelaProfessor th:nth-child(10),
+#tabelaProfessor td:nth-child(10),
+#tabelaProfessor th:nth-child(11),
+#tabelaProfessor td:nth-child(11) {
+    text-align: center;
+    width: 80px;
+}
+
 .tabela-padrao td input[type="text"],
 .tabela-padrao td input[type="time"] {
     width: 100%;
@@ -497,6 +510,16 @@ button.small {
 .chips-group {
     display: flex;
     flex-wrap: wrap;
+    gap: 6px;
+}
+
+#chips-turma {
+    align-items: flex-start;
+}
+
+#chips-turma .chips-curso-column {
+    display: flex;
+    flex-direction: column;
     gap: 6px;
 }
 
@@ -552,7 +575,13 @@ button.small {
 }
 
 .grade-horarios tr.linha-dia td {
-    border-bottom: 2px solid #95a5a6;
+    border-top: 1px solid #7f8c8d;
+    border-bottom: 1px solid #7f8c8d;
+    background: #ecf0f1;
+    font-weight: 700;
+    font-size: 0.65rem;
+    text-align: center;
+    padding: 1px 2px;
 }
 
 .grade-horarios th.horario-col {
@@ -1050,60 +1079,85 @@ button.small {
 }
 
 @media print {
-    body {
+    body.print-relatorios,
+    body.print-consultas {
         background: #fff;
     }
 
-    /* Esconde tudo por padrão */
-    body * {
+    body.print-relatorios *,
+    body.print-consultas * {
         visibility: hidden;
     }
 
-    /* Mostra apenas o card de Relatório por Professor */
-    #relatorios,
-    #relatorios * {
+    body.print-relatorios #relatorios,
+    body.print-relatorios #relatorios * {
         visibility: visible;
     }
 
-    /* Garante que só o card fique na página */
-    #relatorios {
+    body.print-relatorios #relatorios {
         position: absolute;
         inset: 0;
-        padding: 5mm;
+        padding: 8mm 6mm 6mm 6mm;
         background: #fff;
     }
 
-    /* Esconde menus, cabeçalho, outros cards dentro de Relatórios */
-    header,
-    .sidebar,
-    #relatorios > .card:not(:last-child),
-    .form-grid,
-    .hint:not(#tabelaProfessorTitulo) {
+    body.print-relatorios header,
+    body.print-relatorios .sidebar,
+    body.print-relatorios #relatorios > .card:not(:last-child),
+    body.print-relatorios .form-grid,
+    body.print-relatorios .hint:not(#tabelaProfessorTitulo) {
         display: none !important;
     }
 
-    /* Mostra título da tabela do professor e a própria tabela */
-    #tabelaProfessorTitulo,
-    #tabelaProfessorTitulo *,
-    #tabelaProfessor,
-    #tabelaProfessor * {
+    body.print-relatorios #tabelaProfessorTitulo,
+    body.print-relatorios #tabelaProfessorTitulo *,
+    body.print-relatorios #tabelaProfessor,
+    body.print-relatorios #tabelaProfessor * {
         visibility: visible;
     }
 
-    #tabelaProfessor {
+    body.print-relatorios #tabelaProfessor {
         width: 100%;
-        font-size: 11pt;
-        border-collapse: collapse;
-        color: #000;
     }
 
-    #tabelaProfessor th,
-    #tabelaProfessor td {
-        padding: 6px 8px;
-        border: 0.6pt solid #000;
+    body.print-consultas header,
+    body.print-consultas header *,
+    body.print-consultas #consultas,
+    body.print-consultas #consultas * {
+        visibility: visible;
     }
 
-    #tabelaProfessor th {
-        font-weight: 700;
+    body.print-consultas .sidebar,
+    body.print-consultas #loginCard,
+    body.print-consultas #professores,
+    body.print-consultas #turmas,
+    body.print-consultas #horarios,
+    body.print-consultas #relatorios,
+    body.print-consultas #modalCurso,
+    body.print-consultas #modalAula,
+    body.print-consultas #modalTurma,
+    body.print-consultas #modalProfessorPerfil {
+        display: none !important;
+    }
+
+    body.print-consultas #consultas {
+        position: absolute;
+        inset: 0;
+        padding: 6mm 6mm 5mm 6mm;
+        background: #fff;
+    }
+
+    body.print-consultas #consultas .card:first-of-type {
+        display: none !important;
+    }
+
+    body.print-consultas #tabelaConsulta {
+        width: 100%;
+        font-size: 10pt;
+    }
+
+    body.print-consultas #tabelaConsulta th,
+    body.print-consultas #tabelaConsulta td {
+        padding: 4px 6px;
     }
 }

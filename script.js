@@ -7,6 +7,10 @@ const APP_PREFIX = 'horarios_escola_';
 
 // Dias e turnos
 const DIAS_SEMANA = ['SEGUNDA', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SABADO'];
+
+function diasInsercaoRapida() {
+    return DIAS_SEMANA.filter(d => d !== 'SABADO');
+}
 const TURNOS = ['MANHA', 'TARDE', 'NOITE'];
 
 // Tempos de aula por turno
@@ -61,11 +65,10 @@ function etiquetaTempoMin(tempo) {
     if (tempo.intervalo) return 'INTERVALO';
     return tempo.etiqueta.replace(' Tempo', ' T');
 }
-// Dados principais
 let cursos = ['Informática', 'Administração', 'Enfermagem'];
-let professores = []; // {id, nome, disciplinas[], cor}
-let turmas = [];      // {id, nome, curso, turno, descricao}
-let aulas = [];       // {id, turno, dia, turmaId, tempoId, disciplina, professorId}
+let professores = [];
+let turmas = [];
+let aulas = [];
 
 const ROLES = {
     ADMIN: 'ADMIN',
@@ -88,7 +91,7 @@ let usuarioLogado = null;
 let turnoAtualGrade = 'MANHA';
 let modoVisualGrade = 'TURNO';
 let cursoVisualGrade = '';
-let pilhaUndo = []; // para desfazer ajustes inteligentes
+let pilhaUndo = [];
 
 // Controle do modal de edição de aula
 let aulaEmEdicao = null;
@@ -107,6 +110,34 @@ let dadosModificados = false;
 // =======================
 // UTILITÁRIOS
 // =======================
+
+function atualizarIndicadorDesfazerTurno() {
+    const btn = document.getElementById('btnDesfazerTurno');
+    if (!btn) return;
+    const turno = turnoAtualGrade;
+    let qtd = 0;
+    pilhaUndo.forEach(item => {
+        try {
+            const entry = JSON.parse(item);
+            if (entry && entry.turno === turno) {
+                qtd++;
+            }
+        } catch (e) {
+        }
+    });
+    const base = '↩️ Desfazer';
+    btn.textContent = qtd > 0 ? `${base} (${qtd})` : base;
+}
+
+function capturarEstadoAulas() {
+    const turno = turnoAtualGrade;
+    const aulasTurno = aulas.filter(a => a.turno === turno);
+    pilhaUndo.push(JSON.stringify({ turno, aulas: aulasTurno }));
+    if (pilhaUndo.length > 20) {
+        pilhaUndo.shift();
+    }
+    atualizarIndicadorDesfazerTurno();
+}
 
 function gerarId() {
     return Date.now().toString(36) + Math.random().toString(36).substring(2, 8);
@@ -163,18 +194,41 @@ function textoFaseTurma(fase) {
     return '';
 }
 
+function compararTurmasPorCursoETipo(a, b) {
+    const tipoA = a.tipoTurma || '';
+    const tipoB = b.tipoTurma || '';
+    const subA = tipoA === 'SUBSEQUENTE';
+    const subB = tipoB === 'SUBSEQUENTE';
+    if (subA !== subB) return subA ? 1 : -1;
+    const ca = (a.curso || '').toString();
+    const cb = (b.curso || '').toString();
+    const cmpCurso = ca.localeCompare(cb, 'pt-BR', { sensitivity: 'base' });
+    if (cmpCurso !== 0) return cmpCurso;
+    return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+}
+
 function atualizarOpcoesFaseTurma(idSelectAno, idSelectFase) {
     const selAno = document.getElementById(idSelectAno);
     const selFase = document.getElementById(idSelectFase);
     if (!selAno || !selFase) return;
     const ano = selAno.value;
     let fases = [];
-    if (ano === '1ANO') {
-        fases = ['I', 'II'];
-    } else if (ano === '2ANO') {
-        fases = ['III', 'IV'];
-    } else if (ano === '3ANO') {
-        fases = ['V', 'VI'];
+    let tipo = '';
+    if (idSelectAno === 'anoTurma') {
+        const selTipo = document.getElementById('tipoTurma');
+        tipo = selTipo ? selTipo.value : '';
+    } else if (idSelectAno === 'modalAnoTurma') {
+        const selTipo = document.getElementById('modalTipoTurma');
+        tipo = selTipo ? selTipo.value : '';
+    }
+    if (tipo !== 'FUNDAMENTAL1' && tipo !== 'FUNDAMENTAL') {
+        if (ano === '1ANO') {
+            fases = ['I', 'II'];
+        } else if (ano === '2ANO') {
+            fases = ['III', 'IV'];
+        } else if (ano === '3ANO') {
+            fases = ['V', 'VI'];
+        }
     }
     selFase.innerHTML = '<option value="">Fase...</option>';
     fases.forEach(f => {
@@ -222,6 +276,83 @@ function abreviar(str, tam) {
     return str.length > tam ? str.slice(0, tam - 1) + '…' : str;
 }
 
+let apelidosDisciplinas = {};
+
+function apelidarDisciplina(nome) {
+    if (!nome) return '';
+    const key = nome.trim();
+    if (apelidosDisciplinas && Object.prototype.hasOwnProperty.call(apelidosDisciplinas, key)) {
+        const ap = apelidosDisciplinas[key];
+        if (ap && ap.trim()) return ap.trim();
+    }
+    return nome;
+}
+
+function preencherSelectDisciplinasApelido() {
+    const sel = document.getElementById('disciplinaApelidoSelect');
+    if (!sel) return;
+    const disciplinas = [...new Set(
+        [
+            ...professores
+                .flatMap(p => Array.isArray(p.disciplinas) ? p.disciplinas : []),
+            ...aulas
+                .map(a => a.disciplina)
+        ].filter(Boolean)
+    )].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const atual = sel.value;
+    sel.innerHTML = '<option value="">Selecione...</option>' +
+        disciplinas.map(d => `<option value="${d}">${d}</option>`).join('');
+    if (atual) sel.value = atual;
+    const inputApelido = document.getElementById('apelidoDisciplinaInput');
+    const chkRemover = document.getElementById('removerApelidoDisciplinaCheckbox');
+    if (inputApelido) {
+        inputApelido.disabled = false;
+        inputApelido.value = '';
+        if (sel.value && apelidosDisciplinas[sel.value]) {
+            inputApelido.value = apelidosDisciplinas[sel.value];
+        }
+    }
+    if (chkRemover) {
+        chkRemover.checked = false;
+    }
+}
+
+function salvarApelidoDisciplina(ev) {
+    ev.preventDefault();
+    const sel = document.getElementById('disciplinaApelidoSelect');
+    const input = document.getElementById('apelidoDisciplinaInput');
+    if (!sel || !input) return;
+    const disciplina = sel.value.trim();
+    const apelido = input.value.trim();
+    if (!disciplina) {
+        mostrarToast('Selecione uma disciplina para apelidar.', 'warning');
+        return;
+    }
+    if (!apelido) {
+        delete apelidosDisciplinas[disciplina];
+        mostrarToast('Apelido removido para esta disciplina.');
+    } else {
+        apelidosDisciplinas[disciplina] = apelido;
+        mostrarToast('Apelido salvo para a disciplina.');
+    }
+    salvarLocal();
+}
+
+function toggleRemoverApelidoDisciplina(chk) {
+    const input = document.getElementById('apelidoDisciplinaInput');
+    if (!input) return;
+    if (chk && chk.checked) {
+        input.value = '';
+        input.disabled = true;
+    } else {
+        input.disabled = false;
+        const sel = document.getElementById('disciplinaApelidoSelect');
+        if (sel && sel.value && apelidosDisciplinas[sel.value]) {
+            input.value = apelidosDisciplinas[sel.value];
+        }
+    }
+}
+
 function mostrarToast(mensagem, tipo = 'success') {
     // Remove toast anterior
     const toastAntigo = document.querySelector('.toast');
@@ -251,6 +382,7 @@ function salvarLocal() {
         localStorage.setItem(`${APP_PREFIX}aulas`, JSON.stringify(aulas));
         localStorage.setItem(`${APP_PREFIX}cursos`, JSON.stringify(cursos));
         localStorage.setItem(`${APP_PREFIX}tempos_por_turno`, JSON.stringify(TEMPOS_POR_TURNO));
+        localStorage.setItem(`${APP_PREFIX}apelidos_disciplinas`, JSON.stringify(apelidosDisciplinas));
         dadosModificados = true;
         mostrarToast('Dados salvos com sucesso!');
     } catch (e) {
@@ -266,12 +398,16 @@ function carregarLocal() {
         const a = localStorage.getItem(`${APP_PREFIX}aulas`);
         const c = localStorage.getItem(`${APP_PREFIX}cursos`);
         const tempos = localStorage.getItem(`${APP_PREFIX}tempos_por_turno`);
+        const ap = localStorage.getItem(`${APP_PREFIX}apelidos_disciplinas`);
         if (p) professores = JSON.parse(p);
         if (t) turmas = JSON.parse(t);
         if (a) aulas = JSON.parse(a);
         if (c) cursos = JSON.parse(c);
         if (tempos) {
             try { TEMPOS_POR_TURNO = JSON.parse(tempos); } catch {}
+        }
+        if (ap) {
+            try { apelidosDisciplinas = JSON.parse(ap) || {}; } catch { apelidosDisciplinas = {}; }
         }
     } catch (e) {
         console.warn('Não foi possível carregar do localStorage', e);
@@ -362,8 +498,11 @@ function professorDisponivelNoHorario(prof, turno, dia, tempoId) {
     }
 
     if (disp) {
-        const turnosDia = disp[dia] || [];
-        const okDiaTurno = turnosDia.length === 0 ? true : turnosDia.includes(turno);
+        const turnosDia = disp[dia];
+        if (!turnosDia || !Array.isArray(turnosDia) || turnosDia.length === 0) {
+            return false;
+        }
+        const okDiaTurno = turnosDia.includes(turno);
         return okDiaTurno && okTempo;
     } else {
         const okDia = diasF.length === 0 || diasF.includes(dia);
@@ -513,6 +652,7 @@ function selecionarChipTurnoHorario(btn) {
     atualizarChipsTempos();
     turnoAtualGrade = btn.getAttribute('data-value');
     montarGradeTurno(turnoAtualGrade);
+    atualizarIndicadorDesfazerTurno();
 }
 
 // turno na visualização da grade
@@ -527,6 +667,7 @@ function mudarTurnoVisual(btn) {
     selecionarChip('chips-turno-visual', 'turnoGradeFake', btn);
     turnoAtualGrade = btn.getAttribute('data-value');
     montarGradeTurno(turnoAtualGrade);
+    atualizarIndicadorDesfazerTurno();
 }
 
 function mudarModoVisual(btn) {
@@ -546,6 +687,525 @@ function mudarModoVisual(btn) {
 function mudarCursoVisual(select) {
     cursoVisualGrade = select.value || '';
     montarGradeTurno(turnoAtualGrade);
+}
+
+function toggleInsercaoRapida() {
+    const box = document.getElementById('editorQuickInsert');
+    if (!box) return;
+    const btn = document.getElementById('btnToggleInsercaoRapida');
+    const visivel = box.style.display !== 'none';
+    const novoVisivel = !visivel;
+    box.style.display = novoVisivel ? 'block' : 'none';
+    if (btn) {
+        if (novoVisivel) {
+            btn.className = 'btn-primary';
+            btn.textContent = '💡 Inserção rápida (ativa)';
+        } else {
+            btn.className = 'btn-secondary';
+            btn.textContent = '💡 Inserção rápida';
+        }
+    }
+}
+
+function baixarModeloExcelInsercaoRapida() {
+    if (!turmas || !turmas.length) {
+        mostrarToast('Não há turmas cadastradas para gerar o modelo.', 'warning');
+        return;
+    }
+    const cabecalho = ['TURMA', 'TURNO', 'PROFESSOR', 'DISCIPLINA', 'QTDE_TEMPOS'];
+    const linhas = [cabecalho.join(';')];
+    const ordenadas = [...turmas].sort((a, b) => {
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[a.turno] || 99;
+        const tb = ordemTurno[b.turno] || 99;
+        if (ta !== tb) return ta - tb;
+        return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+    });
+    ordenadas.forEach(t => {
+        const nomeTurma = (t.nome || '').replace(/;/g, ',');
+        const turno = t.turno || '';
+        for (let i = 0; i < 6; i++) {
+            linhas.push([nomeTurma, turno, '', '', ''].join(';'));
+        }
+    });
+    const conteudo = linhas.join('\r\n');
+    const blob = new Blob([conteudo], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'modelo_insercao_rapida.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+}
+
+function importarExcelInsercaoRapida(event) {
+    const file = event.target.files && event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        let text = '';
+        const result = e.target.result;
+        if (result instanceof ArrayBuffer) {
+            try {
+                const decUtf8 = new TextDecoder('utf-8', { fatal: false });
+                text = decUtf8.decode(result);
+                if (text.indexOf('\uFFFD') !== -1) {
+                    const decLatin = new TextDecoder('iso-8859-1', { fatal: false });
+                    text = decLatin.decode(result);
+                }
+            } catch (err) {
+                const decLatin = new TextDecoder('iso-8859-1', { fatal: false });
+                text = decLatin.decode(result);
+            }
+        } else {
+            text = result || '';
+        }
+        if (text.charCodeAt(0) === 0xFEFF) {
+            text = text.substring(1);
+        }
+        const linhas = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+        if (linhas.length <= 1) {
+            mostrarToast('Arquivo vazio ou sem dados além do cabeçalho.', 'warning');
+            return;
+        }
+
+        let ignoradas = 0;
+        let linhasValidas = 0;
+        const grupos = new Map();
+
+        for (let i = 1; i < linhas.length; i++) {
+            const linha = linhas[i];
+            const cols = linha.split(';');
+            if (cols.length < 5) {
+                ignoradas++;
+                continue;
+            }
+            const turmaNome = (cols[0] || '').trim();
+            const turnoPlanilha = (cols[1] || '').trim();
+            const professorNome = (cols[2] || '').trim();
+            const disciplina = (cols[3] || '').trim();
+            const qtdStr = (cols[4] || '').trim();
+            if (!turmaNome || !disciplina || !qtdStr) {
+                ignoradas++;
+                continue;
+            }
+            const turma = turmas.find(t =>
+                (t.nome || '').toUpperCase() === turmaNome.toUpperCase()
+            );
+            if (!turma) {
+                ignoradas++;
+                continue;
+            }
+            let quantidade = parseInt(qtdStr, 10);
+            if (isNaN(quantidade) || quantidade < 1) {
+                ignoradas++;
+                continue;
+            }
+            let professorId = null;
+            if (professorNome) {
+                const prof = professores.find(p =>
+                    (p.nome || '').toUpperCase() === professorNome.toUpperCase()
+                );
+                if (prof) {
+                    professorId = prof.id;
+                }
+            }
+
+            const disciplinaUpper = (disciplina || '').toUpperCase();
+            const chaveGrupo = `${turma.id}|${disciplinaUpper}|${professorId || ''}`;
+            if (!grupos.has(chaveGrupo)) {
+                grupos.set(chaveGrupo, {
+                    turno: turma.turno,
+                    turmaId: turma.id,
+                    disciplina,
+                    disciplinaUpper,
+                    professorId,
+                    quantidade: 0
+                });
+            }
+            const grupo = grupos.get(chaveGrupo);
+            grupo.quantidade += quantidade;
+            linhasValidas++;
+        }
+
+        let gruposAplicados = 0;
+        grupos.forEach(grupo => {
+            if (grupo.quantidade > 0) {
+                ajusteInteligenteInsercaoRapida(
+                    grupo.turno,
+                    grupo.turmaId,
+                    grupo.disciplina,
+                    grupo.professorId,
+                    grupo.quantidade
+                );
+                gruposAplicados++;
+            }
+        });
+
+        if (gruposAplicados === 0) {
+            mostrarToast('Nenhum pedido da planilha pôde ser aplicado. Verifique os dados.', 'warning');
+        } else {
+            mostrarToast(`Inserção rápida via planilha concluída. Solicitações aplicadas: ${gruposAplicados}. Linhas ignoradas: ${ignoradas}.`, 'success');
+        }
+        event.target.value = '';
+    };
+    reader.readAsArrayBuffer(file);
+}
+
+function obterDadosInsercaoRapida() {
+    const turnoSel = document.getElementById('rapidoTurno');
+    const turmaSel = document.getElementById('rapidoTurma');
+    const profSel = document.getElementById('rapidoProfessor');
+    const discInput = document.getElementById('rapidoDisciplina');
+    const qtdInput = document.getElementById('rapidoQuantidade');
+    return {
+        turno: turnoSel ? turnoSel.value : '',
+        turmaId: turmaSel ? turmaSel.value : '',
+        professorId: profSel ? profSel.value : '',
+        disciplina: discInput ? discInput.value.trim() : '',
+        quantidade: qtdInput ? qtdInput.value : '1'
+    };
+}
+
+function tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, professorId) {
+    if (!disciplina) {
+        return false;
+    }
+    const temposTurno = getTempos(turno);
+    let realocacoes = [];
+    if (professorId) {
+        const prof = professores.find(p => p.id === professorId);
+        if (!prof) {
+            return false;
+        }
+        const indisponiveis = [];
+        tempoIds.forEach(id => {
+            if (!professorDisponivelNoHorario(prof, turno, dia, id)) {
+                const tempo = temposTurno.find(t => t.id === id);
+                indisponiveis.push(tempo ? tempo.etiqueta : id);
+            }
+        });
+        if (indisponiveis.length > 0) {
+            return false;
+        }
+        const conflitos = [];
+        tempoIds.forEach(id => {
+            if (verificarConflitoProfessor(professorId, turno, dia, id)) {
+                const tempo = temposTurno.find(t => t.id === id);
+                conflitos.push(tempo ? tempo.etiqueta : id);
+            }
+        });
+        if (conflitos.length > 0) {
+            return false;
+        }
+        const maxPorTurmaDia = 4;
+        const aulasProfTurmaDia = aulas.filter(a =>
+            a.turno === turno &&
+            a.dia === dia &&
+            a.turmaId === turmaId &&
+            a.professorId === professorId
+        );
+        const totalFinalProfTurmaDia = aulasProfTurmaDia.length + tempoIds.length;
+        if (totalFinalProfTurmaDia > maxPorTurmaDia) {
+            return false;
+        }
+    }
+    const conflitosTurma = [];
+    tempoIds.forEach(id => {
+        const ja = aulas.find(a =>
+            a.turno === turno &&
+            a.dia === dia &&
+            a.turmaId === turmaId &&
+            a.tempoId === id
+        );
+        if (ja) conflitosTurma.push(id);
+    });
+    if (conflitosTurma.length) {
+        const dias = diasInsercaoRapida();
+        const slotsProibidos = new Set();
+        tempoIds.forEach(id => slotsProibidos.add(`${dia}|${id}`));
+        const aulasBloqueando = [];
+        tempoIds.forEach(id => {
+            const aula = aulas.find(a =>
+                a.turno === turno &&
+                a.dia === dia &&
+                a.turmaId === turmaId &&
+                a.tempoId === id
+            );
+            if (aula && !aulasBloqueando.some(x => x.id === aula.id)) {
+                aulasBloqueando.push(aula);
+            }
+        });
+        for (let i = 0; i < aulasBloqueando.length; i++) {
+            const aula = aulasBloqueando[i];
+            const sugestao = sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsProibidos);
+            if (!sugestao) {
+                return false;
+            }
+            realocacoes.push({
+                aulaId: aula.id,
+                novoDia: sugestao.dia,
+                novoTempoId: sugestao.tempoId
+            });
+            slotsProibidos.add(`${sugestao.dia}|${sugestao.tempoId}`);
+        }
+    }
+    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    const disciplinaSujeitaRegra =
+        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    if (disciplinaSujeitaRegra) {
+        const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
+            a.turmaId === turmaId &&
+            a.dia === dia &&
+            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+            !tempoIds.includes(a.tempoId)
+        );
+        const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + tempoIds.length;
+        const limite = 2;
+        if (totalFinalDiscDia > limite) {
+            return false;
+        }
+    }
+    capturarEstadoAulas();
+    realocacoes.forEach(r => {
+        const aula = aulas.find(a => a.id === r.aulaId);
+        if (aula) {
+            aula.dia = r.novoDia;
+            aula.tempoId = r.novoTempoId;
+        }
+    });
+    aulas = aulas.filter(a =>
+        !(a.turno === turno &&
+          a.dia === dia &&
+          a.turmaId === turmaId &&
+          tempoIds.includes(a.tempoId))
+    );
+    tempoIds.forEach(id => {
+        aulas.push({
+            id: gerarId(),
+            turno,
+            dia,
+            turmaId,
+            tempoId: id,
+            disciplina,
+            professorId
+        });
+    });
+    salvarLocal();
+    montarGradeTurno(turnoAtualGrade);
+    mostrarToast(`Aula(s) lançada(s) pela inserção rápida. (${tempoIds.length} tempo(s))`);
+    return true;
+}
+
+function sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsProibidos) {
+    const profId = aula.professorId || null;
+    let prof = null;
+    if (profId) {
+        prof = professores.find(p => p.id === profId);
+        if (!prof) return null;
+    }
+    const nomeDiscNorm = (aula.disciplina || '').toUpperCase();
+    const disciplinaSujeitaRegra =
+        nomeDiscNorm.includes('PORTUG') || nomeDiscNorm.includes('MATEM');
+    for (let d = 0; d < dias.length; d++) {
+        const dia = dias[d];
+        for (let i = 0; i < temposTurno.length; i++) {
+            const t = temposTurno[i];
+            if (t.intervalo) continue;
+            const chave = `${dia}|${t.id}`;
+            if (slotsProibidos.has(chave)) continue;
+            const ocupadoTurma = aulas.some(x =>
+                x.id !== aula.id &&
+                x.turno === turno &&
+                x.dia === dia &&
+                x.turmaId === aula.turmaId &&
+                x.tempoId === t.id
+            );
+            if (ocupadoTurma) continue;
+            if (prof) {
+                if (!professorDisponivelNoHorario(prof, turno, dia, t.id)) continue;
+                if (verificarConflitoProfessor(profId, turno, dia, t.id)) continue;
+                const maxPorTurmaDia = 4;
+                const aulasProfTurmaDia = aulas.filter(a =>
+                    a.id !== aula.id &&
+                    a.turno === turno &&
+                    a.dia === dia &&
+                    a.turmaId === aula.turmaId &&
+                    a.professorId === profId
+                );
+                const totalFinalProfTurmaDia = aulasProfTurmaDia.length + 1;
+                if (totalFinalProfTurmaDia > maxPorTurmaDia) continue;
+            }
+        if (disciplinaSujeitaRegra) {
+                const aulasDiaMesmaDisc = aulas.filter(a =>
+                    a.id !== aula.id &&
+                    a.turno === turno &&
+                    a.dia === dia &&
+                    a.turmaId === aula.turmaId &&
+                    (a.disciplina || '').toUpperCase() === nomeDiscNorm
+                );
+                const total = aulasDiaMesmaDisc.length + 1;
+                if (total > 2) continue;
+            }
+            return { dia, tempoId: t.id };
+        }
+    }
+    return null;
+}
+
+function encontrarBlocoDoisTemposDiaPortMat(turno, dia, turmaId, disciplina, professorId, temposTurno, temposValidos, dias) {
+    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    let prof = null;
+    if (professorId) {
+        prof = professores.find(p => p.id === professorId);
+        if (!prof) return null;
+    }
+    const aulasDiaDisc = aulas.filter(a =>
+        a.turmaId === turmaId &&
+        a.dia === dia &&
+        (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm
+    );
+    if (aulasDiaDisc.length > 1) {
+        return null;
+    }
+    for (let i = 0; i < temposValidos.length - 1; i++) {
+        const t1 = temposValidos[i];
+        const t2 = temposValidos[i + 1];
+        const idx1 = temposTurno.findIndex(tt => tt.id === t1.id);
+        const idx2 = temposTurno.findIndex(tt => tt.id === t2.id);
+        if (idx1 === -1 || idx2 === -1) continue;
+        if (idx2 <= idx1) continue;
+        if (prof) {
+            if (!professorDisponivelNoHorario(prof, turno, dia, t1.id)) continue;
+            if (!professorDisponivelNoHorario(prof, turno, dia, t2.id)) continue;
+            if (verificarConflitoProfessor(professorId, turno, dia, t1.id)) continue;
+            if (verificarConflitoProfessor(professorId, turno, dia, t2.id)) continue;
+        }
+        const slotsProibidos = new Set();
+        slotsProibidos.add(`${dia}|${t1.id}`);
+        slotsProibidos.add(`${dia}|${t2.id}`);
+        const aulasBloqueando = [];
+        [t1.id, t2.id].forEach(idTempo => {
+            const aTurma = aulas.find(a =>
+                a.turno === turno &&
+                a.dia === dia &&
+                a.turmaId === turmaId &&
+                a.tempoId === idTempo
+            );
+            if (aTurma) aulasBloqueando.push(aTurma);
+        });
+        if (!aulasBloqueando.length) {
+            const totalFinal = aulasDiaDisc.length + 2;
+            if (totalFinal > 2) {
+                continue;
+            }
+            return {
+                dia,
+                tempos: [t1.id, t2.id],
+                realocacoes: []
+            };
+        }
+        const realocacoes = [];
+        let falhou = false;
+        for (let k = 0; k < aulasBloqueando.length; k++) {
+            const aula = aulasBloqueando[k];
+            const sugestao = sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsProibidos);
+            if (!sugestao) {
+                falhou = true;
+                break;
+            }
+            realocacoes.push({
+                aulaId: aula.id,
+                novoDia: sugestao.dia,
+                novoTempoId: sugestao.tempoId
+            });
+            slotsProibidos.add(`${sugestao.dia}|${sugestao.tempoId}`);
+        }
+        if (falhou) continue;
+        const totalFinal = aulasDiaDisc.length + 2;
+        if (totalFinal > 2) {
+            continue;
+        }
+        return {
+            dia,
+            tempos: [t1.id, t2.id],
+            realocacoes
+        };
+    }
+    return null;
+}
+
+function aplicarInsercaoRapidaEspecialPortMat(turno, turmaId, disciplina, professorId, quantidade) {
+    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    const temposTurno = getTempos(turno);
+    const temposValidos = temposTurno.filter(t => !t.intervalo);
+    if (!temposValidos.length) {
+        mostrarToast('Não há tempos configurados para este turno.', 'warning');
+        return false;
+    }
+    const dias = diasInsercaoRapida();
+    const blocosEscolhidos = [];
+    const realocacoesAcumuladas = [];
+    for (let d = 0; d < dias.length; d++) {
+        const dia = dias[d];
+        const resultado = encontrarBlocoDoisTemposDiaPortMat(
+            turno,
+            dia,
+            turmaId,
+            disciplina,
+            professorId,
+            temposTurno,
+            temposValidos,
+            dias
+        );
+        if (resultado) {
+            blocosEscolhidos.push({ dia: resultado.dia, tempos: resultado.tempos });
+            realocacoesAcumuladas.push(...resultado.realocacoes);
+        }
+        if (blocosEscolhidos.length === 2) break;
+    }
+    if (blocosEscolhidos.length < 2) {
+        return false;
+    }
+    capturarEstadoAulas();
+    realocacoesAcumuladas.forEach(r => {
+        const aula = aulas.find(a => a.id === r.aulaId);
+        if (aula) {
+            aula.dia = r.novoDia;
+            aula.tempoId = r.novoTempoId;
+        }
+    });
+    blocosEscolhidos.forEach(b => {
+        b.tempos.forEach(idTempo => {
+            aulas = aulas.filter(a =>
+                !(a.turno === turno &&
+                  a.dia === b.dia &&
+                  a.turmaId === turmaId &&
+                  a.tempoId === idTempo)
+            );
+        });
+    });
+    blocosEscolhidos.forEach(b => {
+        b.tempos.forEach(idTempo => {
+            aulas.push({
+                id: gerarId(),
+                turno,
+                dia: b.dia,
+                turmaId,
+                tempoId: idTempo,
+                disciplina,
+                professorId: professorId || null
+            });
+        });
+    });
+    salvarLocal();
+    montarGradeTurno(turnoAtualGrade);
+    const b1 = blocosEscolhidos[0];
+    const b2 = blocosEscolhidos[1];
+    mostrarToast(`Foram lançados 4 tempos (2 em ${textoDia(b1.dia)}, 2 em ${textoDia(b2.dia)}).`);
+    return true;
 }
 
 // Atualiza valor do hidden de tempos com base nos chips selecionados
@@ -598,14 +1258,24 @@ function atualizarListaProfessores() {
     const selProf = document.getElementById('professorHorario');
     const selProfRel = document.getElementById('professorRelatorio');
     const selProfModal = document.getElementById('modalProfessor');
+    const selProfRapido = document.getElementById('rapidoProfessor');
 
     if (!corpo) return;
     corpo.innerHTML = '';
     if (selProf) selProf.innerHTML = '<option value="">Selecione...</option>';
     if (selProfRel) selProfRel.innerHTML = '<option value="">Selecione...</option>';
     if (selProfModal) selProfModal.innerHTML = '<option value="">Selecione...</option>';
+    if (selProfRapido) selProfRapido.innerHTML = '<option value="">Selecione...</option>';
 
-    professores.forEach(p => {
+    const ordenados = [...professores].sort((a, b) => {
+        const pesoBase = (x) => x.baseTipo === 'COMUM' ? 2 : 1;
+        const pa = pesoBase(a);
+        const pb = pesoBase(b);
+        if (pa !== pb) return pa - pb;
+        return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+    });
+
+    ordenados.forEach(p => {
         // tabela
         const tr = document.createElement('tr');
 
@@ -732,6 +1402,13 @@ function atualizarListaProfessores() {
             opt3.value = p.id;
             opt3.textContent = p.nome;
             selProfModal.appendChild(opt3);
+        }
+
+        if (selProfRapido) {
+            const opt4 = document.createElement('option');
+            opt4.value = p.id;
+            opt4.textContent = p.nome;
+            selProfRapido.appendChild(opt4);
         }
     });
 }
@@ -1040,6 +1717,191 @@ function excluirCursoSelecionado() {
     mostrarToast('Curso excluído com sucesso!');
 }
 
+function preencherSelectTurmaConsulta() {
+    const sel = document.getElementById('filtroTurmaConsulta');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Todas as turmas</option>';
+    const ordenadas = [...turmas].sort((a, b) => {
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[a.turno] || 99;
+        const tb = ordemTurno[b.turno] || 99;
+        if (ta !== tb) return ta - tb;
+        const ca = (a.curso || '').toString();
+        const cb = (b.curso || '').toString();
+        const cmpCurso = ca.localeCompare(cb, 'pt-BR', { sensitivity: 'base' });
+        if (cmpCurso !== 0) return cmpCurso;
+        return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+    });
+    ordenadas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.nome} (${textoTurno(t.turno)})`;
+        sel.appendChild(opt);
+    });
+}
+
+function atualizarSelectTurmaConsulta() {
+    const sel = document.getElementById('filtroTurmaConsulta');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Todas as turmas</option>';
+    const ordenadas = [...turmas].sort((a, b) => {
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[a.turno] || 99;
+        const tb = ordemTurno[b.turno] || 99;
+        if (ta !== tb) return ta - tb;
+        const ca = (a.curso || '').toString();
+        const cb = (b.curso || '').toString();
+        const cmpCurso = ca.localeCompare(cb, 'pt-BR', { sensitivity: 'base' });
+        if (cmpCurso !== 0) return cmpCurso;
+        return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+    });
+    ordenadas.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.nome} (${textoTurno(t.turno)})`;
+        sel.appendChild(opt);
+    });
+}
+
+function atualizarSelectTurmasInsercaoRapida() {
+    const sel = document.getElementById('rapidoTurma');
+    if (!sel) return;
+    const turnoSel = document.getElementById('rapidoTurno')?.value || '';
+    sel.innerHTML = '<option value="">Selecione...</option>';
+    let lista = [...turmas];
+    if (turnoSel) {
+        lista = lista.filter(t => t.turno === turnoSel);
+    }
+    lista.sort(compararTurmasPorCursoETipo);
+    lista.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = `${t.nome} (${textoTurno(t.turno)})`;
+        sel.appendChild(opt);
+    });
+}
+
+function aplicarInsercaoRapidaAuto() {
+    const dados = obterDadosInsercaoRapida();
+    const turno = dados.turno || turnoAtualGrade;
+    const turmaId = dados.turmaId;
+    const disciplina = dados.disciplina;
+    const professorId = dados.professorId || null;
+    let quantidade = parseInt(dados.quantidade || '1', 10);
+    ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId, quantidade);
+}
+
+function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId, quantidade) {
+    if (!turno || !turmaId || !disciplina) {
+        mostrarToast('Informe turno, turma e disciplina na inserção rápida.', 'warning');
+        return;
+    }
+    if (isNaN(quantidade) || quantidade < 1) quantidade = 1;
+    const quantidadeOriginal = quantidade;
+    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    const disciplinaEspecial =
+        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    if (disciplinaEspecial && quantidade >= 4) {
+        const okEsp = aplicarInsercaoRapidaEspecialPortMat(turno, turmaId, disciplina, professorId, quantidade);
+        if (!okEsp) {
+            mostrarToast('Não foi possível alocar automaticamente 4 tempos (2+2) para esta disciplina com as regras atuais.', 'warning');
+        }
+        return;
+    }
+    const temposTurno = getTempos(turno);
+    const temposValidos = temposTurno.filter(t => !t.intervalo);
+    if (!temposValidos.length) {
+        mostrarToast('Não há tempos configurados para este turno.', 'warning');
+        return;
+    }
+    const dias = diasInsercaoRapida();
+    for (let d = 0; d < dias.length; d++) {
+        const dia = dias[d];
+        for (let i = 0; i < temposTurno.length; i++) {
+            const tempoInicial = temposTurno[i];
+            if (tempoInicial.intervalo) continue;
+            const tempoIds = [];
+            for (let j = i; j < temposTurno.length && tempoIds.length < quantidade; j++) {
+                const t = temposTurno[j];
+                if (t.intervalo) continue;
+                tempoIds.push(t.id);
+            }
+            if (tempoIds.length !== quantidade) continue;
+            const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, professorId);
+            if (ok) {
+                return;
+            }
+        }
+    }
+
+    let restantes = quantidadeOriginal;
+    let inseridos = 0;
+
+    if (!disciplinaEspecial && restantes >= 2) {
+        while (restantes >= 2) {
+            let alocouBloco = false;
+            for (let d = 0; d < dias.length && !alocouBloco; d++) {
+                const dia = dias[d];
+                for (let i = 0; i < temposTurno.length && !alocouBloco; i++) {
+                    const tempoInicial = temposTurno[i];
+                    if (tempoInicial.intervalo) continue;
+                    const tempoIds = [];
+                    for (let j = i; j < temposTurno.length && tempoIds.length < 2; j++) {
+                        const t = temposTurno[j];
+                        if (t.intervalo) continue;
+                        tempoIds.push(t.id);
+                    }
+                    if (tempoIds.length !== 2) continue;
+                    const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, professorId);
+                    if (ok) {
+                        restantes -= 2;
+                        inseridos += 2;
+                        alocouBloco = true;
+                    }
+                }
+            }
+            if (!alocouBloco) {
+                break;
+            }
+        }
+    }
+
+    if (restantes > 0) {
+        if (quantidadeOriginal === 1) {
+            for (let d = 0; d < dias.length && restantes > 0; d++) {
+                const dia = dias[d];
+                for (let i = 1; i < temposValidos.length && restantes > 0; i++) {
+                    const t = temposValidos[i];
+                    const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, [t.id], disciplina, professorId);
+                    if (ok) {
+                        restantes--;
+                        inseridos++;
+                    }
+                }
+            }
+        }
+        for (let d = 0; d < dias.length && restantes > 0; d++) {
+            const dia = dias[d];
+            for (let i = 0; i < temposValidos.length && restantes > 0; i++) {
+                const t = temposValidos[i];
+                const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, [t.id], disciplina, professorId);
+                if (ok) {
+                    restantes--;
+                    inseridos++;
+                }
+            }
+        }
+    }
+
+    if (inseridos === 0) {
+        mostrarToast('Não foi possível alocar automaticamente as aulas com as regras atuais.', 'warning');
+        return;
+    }
+    if (inseridos < quantidadeOriginal) {
+        mostrarToast(`Foram lançados ${inseridos} de ${quantidadeOriginal} tempos solicitados; não foi possível alocar todos com as regras atuais.`, 'warning');
+    }
+}
+
 function atualizarListaTurmas() {
     const corpo = document.getElementById('listaTurmas');
     const selTurmaLimpeza = document.getElementById('turmaLimpeza');
@@ -1047,7 +1909,19 @@ function atualizarListaTurmas() {
     corpo.innerHTML = '';
     if (selTurmaLimpeza) selTurmaLimpeza.innerHTML = '<option value="">Selecione a turma...</option>';
 
-    turmas.forEach(t => {
+    const ordenadas = [...turmas].sort((a, b) => {
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[a.turno] || 99;
+        const tb = ordemTurno[b.turno] || 99;
+        if (ta !== tb) return ta - tb;
+        const ca = (a.curso || '').toString();
+        const cb = (b.curso || '').toString();
+        const cmpCurso = ca.localeCompare(cb, 'pt-BR', { sensitivity: 'base' });
+        if (cmpCurso !== 0) return cmpCurso;
+        return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+    });
+
+    ordenadas.forEach(t => {
         const tr = document.createElement('tr');
 
         const tdNome = document.createElement('td');
@@ -1143,6 +2017,7 @@ function atualizarListaTurmas() {
     atualizarChipsTurmasHorario();
     montarGradeTurno(turnoAtualGrade);
     preencherSelectCursoRelatorio();
+    preencherSelectTurmaConsulta();
 }
 
 function salvarTurma(e) {
@@ -1364,26 +2239,35 @@ function atualizarChipsTurmasHorario() {
     if (!container) return;
     const turno = document.getElementById('turnoHorario').value;
     container.innerHTML = '';
-
     if (!turno) {
         container.innerHTML = '<span class="hint">Selecione um turno primeiro.</span>';
         return;
     }
-
     const turmasTurno = turmas.filter(t => t.turno === turno);
     if (!turmasTurno.length) {
         container.innerHTML = '<span class="hint">Não há turmas cadastradas neste turno.</span>';
         return;
     }
-
-    turmasTurno.forEach(t => {
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'chip';
-        btn.dataset.value = t.id;
-        btn.textContent = t.nome;
-        btn.onclick = () => selecionarChip('chips-turma', 'turmaHorario', btn);
-        container.appendChild(btn);
+    const ordenadas = [...turmasTurno].sort(compararTurmasPorCursoETipo);
+    const gruposPorCurso = {};
+    ordenadas.forEach(t => {
+        const curso = t.curso || 'Sem curso';
+        if (!gruposPorCurso[curso]) gruposPorCurso[curso] = [];
+        gruposPorCurso[curso].push(t);
+    });
+    Object.keys(gruposPorCurso).forEach(curso => {
+        const col = document.createElement('div');
+        col.className = 'chips-curso-column';
+        gruposPorCurso[curso].forEach(t => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'chip';
+            btn.dataset.value = t.id;
+            btn.textContent = t.nome;
+            btn.onclick = () => selecionarChip('chips-turma', 'turmaHorario', btn);
+            col.appendChild(btn);
+        });
+        container.appendChild(col);
     });
 }
 
@@ -1420,7 +2304,6 @@ function salvarHorario(e) {
         return;
     }
 
-    // Verifica disponibilidade e conflitos de professor
     if (professorId) {
         const prof = professores.find(p => p.id === professorId);
         if (!prof) {
@@ -1455,7 +2338,6 @@ function salvarHorario(e) {
         }
     }
 
-    // Verifica conflitos em qualquer um dos tempos (mesma turma)
     const conflitosTurma = [];
     tempoIds.forEach(tempoId => {
         const ja = aulas.find(a =>
@@ -1471,7 +2353,25 @@ function salvarHorario(e) {
         return;
     }
 
-    // Remove aulas antigas nesses tempos (para essa turma/dia/turno)
+    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    const disciplinaSujeitaRegra =
+        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    if (disciplinaSujeitaRegra) {
+        const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
+            a.turmaId === turmaId &&
+            a.dia === dia &&
+            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+            !tempoIds.includes(a.tempoId)
+        );
+        const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + tempoIds.length;
+        const limite = 2;
+        if (totalFinalDiscDia > limite) {
+            mostrarToast(`Não é permitido lançar mais de ${limite} tempos da mesma disciplina no mesmo dia para esta turma.`, 'warning');
+            return;
+        }
+    }
+
+    capturarEstadoAulas();
     aulas = aulas.filter(a =>
         !(a.turno === turno &&
           a.dia === dia &&
@@ -1479,7 +2379,6 @@ function salvarHorario(e) {
           tempoIds.includes(a.tempoId))
     );
 
-    // Cria uma aula para cada tempo selecionado
     tempoIds.forEach(tempoId => {
         aulas.push({
             id: gerarId(),
@@ -1529,6 +2428,7 @@ function montarGradeTurno(turno) {
     if (modoVisualGrade === 'CURSO' && cursoVisualGrade) {
         turmasTurno = turmasTurno.filter(t => t.curso === cursoVisualGrade);
     }
+    turmasTurno = [...turmasTurno].sort(compararTurmasPorCursoETipo);
     if (!turmasTurno.length) {
         const msg = modoVisualGrade === 'CURSO' && cursoVisualGrade
             ? 'Não há turmas deste curso neste turno.'
@@ -1574,6 +2474,17 @@ function montarGradeTurno(turno) {
 
     DIAS_SEMANA.forEach(dia => {
         if (omitirSabadoGrade && dia === 'SABADO') return;
+
+        if (dia !== 'SEGUNDA') {
+            const trSep = document.createElement('tr');
+            trSep.className = 'linha-dia';
+            const tdSep = document.createElement('td');
+            tdSep.colSpan = 2 + turmasTurno.length;
+            tdSep.textContent = textoDia(dia).toUpperCase();
+            trSep.appendChild(tdSep);
+            tbody.appendChild(trSep);
+        }
+
         let primeiraLinhaDia = true;
 
         const temposTurno = getTempos(turno);
@@ -1624,7 +2535,7 @@ function montarGradeTurno(turno) {
                         bloco.style.justifyContent = 'center';
 
                         bloco.innerHTML =
-                            '<strong>' + abreviar(aula.disciplina, 14) + '</strong>' +
+                            '<strong>' + abreviar(apelidarDisciplina(aula.disciplina), 14) + '</strong>' +
                             '<small>' + (prof ? abreviar(prof.nome, 14) : 'Sem professor') + '</small>';
 
                         bloco.onclick = (ev) => {
@@ -1644,21 +2555,14 @@ function montarGradeTurno(turno) {
                     } else {
                         td.className = 'celula-vazia';
                         td.textContent = 'Clique para adicionar aula';
-                        
-                        // Adiciona ícone visual para indicar que é clicável
                         const icon = document.createElement('div');
                         icon.style.fontSize = '0.9rem';
                         icon.style.opacity = '0.5';
                         icon.style.marginTop = '5px';
                         icon.innerHTML = '➕';
                         td.appendChild(icon);
-                        
-                        td.onclick = () => {
-                            abrirEditorCelulaVazia(turno, dia, turma.id, tempo.id);
-                        };
                     }
 
-                    // Também permite editar clicando na célula em si (não só no bloco)
                     td.onclick = (ev) => {
                         if (ev.target === td || ev.target === td.firstChild) {
                             if (aula) {
@@ -1674,13 +2578,13 @@ function montarGradeTurno(turno) {
                     td.dataset.turmaId = turma.id;
                     td.dataset.tempoId = tempo.id;
                     td.addEventListener('dragover', (ev) => {
-                        if (!aula && !tempo.intervalo) {
+                        if (!tempo.intervalo) {
                             ev.preventDefault();
                             td.classList.add('celula-drop-alvo');
                         }
                     });
                     td.addEventListener('dragenter', (ev) => {
-                        if (!aula && !tempo.intervalo) {
+                        if (!tempo.intervalo) {
                             ev.preventDefault();
                             td.classList.add('celula-drop-alvo');
                         }
@@ -1691,7 +2595,7 @@ function montarGradeTurno(turno) {
                     td.addEventListener('drop', (ev) => {
                         ev.stopPropagation();
                         td.classList.remove('celula-drop-alvo');
-                        if (aula || tempo.intervalo) return;
+                        if (tempo.intervalo) return;
                         ev.preventDefault();
                         const data = ev.dataTransfer.getData('text/plain') || ev.dataTransfer.getData('application/json');
                         if (!data) return;
@@ -1707,7 +2611,55 @@ function montarGradeTurno(turno) {
                                 return;
                             }
                             if (!professorDisponivelNoHorario(prof, turno, dia, tempo.id)) {
-                                const continuarDisp = confirm('Este professor não está disponível neste dia/turno/tempo. Deseja continuar mesmo assim?');
+                                const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+                                const diasForaDisp = new Set();
+                                aulas.forEach(a => {
+                                    if (a.professorId === profId && a.turno === turno) {
+                                        if (!professorDisponivelNoHorario(prof, a.turno, a.dia, a.tempoId)) {
+                                            diasForaDisp.add(a.dia);
+                                        }
+                                    }
+                                });
+                                const diasComDisp = DIAS_SEMANA.filter(diaSigla =>
+                                    temposTurno.some(t => professorDisponivelNoHorario(prof, turno, diaSigla, t.id))
+                                );
+
+                                let msg = 'Este professor não está disponível neste dia/turno/tempo.\n\n';
+                                if (diasComDisp.length && temposTurno.length) {
+                                    const pad = function (text, width) {
+                                        text = String(text);
+                                        if (text.length >= width) return text;
+                                        return text + ' '.repeat(width - text.length);
+                                    };
+                                    msg += 'Disponibilidades deste professor no turno ' + turno + ':\n';
+                                    const colTempoWidth = 6;
+                                    const colDiaWidth = 12;
+                                    const headerTempo = pad('Tp', colTempoWidth);
+                                    const headerDias = diasComDisp.map(d => {
+                                        let nome = textoDia(d).slice(0, 3);
+                                        if (diasForaDisp.has(d)) {
+                                            nome = '*' + nome + '*';
+                                        }
+                                        return pad(nome, colDiaWidth);
+                                    });
+                                    msg += headerTempo + ' | ' + headerDias.join(' | ') + '\n';
+                                    msg += ''.padEnd(headerTempo.length + 3 + headerDias.length * (colDiaWidth + 3) - 3, '-') + '\n';
+
+                                    temposTurno.forEach((t, idxTempo) => {
+                                        const rotuloTempo = pad((idxTempo + 1) + 'º', colTempoWidth);
+                                        const cols = diasComDisp.map(diaSigla =>
+                                            professorDisponivelNoHorario(prof, turno, diaSigla, t.id)
+                                                ? pad(t.inicio + '-' + t.fim, colDiaWidth)
+                                                : pad('', colDiaWidth)
+                                        );
+                                        msg += rotuloTempo + ' | ' + cols.join(' | ') + '\n';
+                                    });
+                                } else {
+                                    msg += 'Não há qualquer tempo disponível para este professor neste turno.\n';
+                                }
+
+                                msg += '\nDeseja continuar mesmo assim?';
+                                const continuarDisp = confirm(msg);
                                 if (!continuarDisp) return;
                             }
                             if (verificarConflitoProfessor(profId, turno, dia, tempo.id)) {
@@ -1715,6 +2667,30 @@ function montarGradeTurno(turno) {
                                 if (!continuar) return;
                             }
                         }
+                        const nomeDisciplinaNorm = (src.disciplina || '').toUpperCase();
+                        const disciplinaSujeitaRegra =
+                            nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+                        if (disciplinaSujeitaRegra) {
+                            const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
+                                a.turmaId === turma.id &&
+                                a.dia === dia &&
+                                (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+                                !(a.turno === turno && a.dia === dia && a.turmaId === turma.id && a.tempoId === tempo.id)
+                            );
+                            const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + 1;
+                            const limite = 2;
+                            if (totalFinalDiscDia > limite) {
+                                mostrarToast(`Não é permitido lançar mais de ${limite} tempos da mesma disciplina no mesmo dia para esta turma.`, 'warning');
+                                return;
+                            }
+                        }
+                        capturarEstadoAulas();
+                        aulas = aulas.filter(a =>
+                            !(a.turno === turno &&
+                              a.dia === dia &&
+                              a.turmaId === turma.id &&
+                              a.tempoId === tempo.id)
+                        );
                         const novaAula = {
                             id: gerarId(),
                             turno,
@@ -1734,17 +2710,12 @@ function montarGradeTurno(turno) {
                 });
             }
 
-            if (idxTempo === temposTurno.length - 1) {
-                tr.classList.add('linha-dia');
-            }
-
             tbody.appendChild(tr);
         });
     });
 
     tabela.appendChild(tbody);
-    
-    // Eventos são vinculados dinamicamente; não usar cache de innerHTML
+    atualizarIndicadorDesfazerTurno();
 }
 
 // editor ao clicar em aula (abre MODAL)
@@ -1803,7 +2774,6 @@ function salvarEdicaoAula(e) {
         return;
     }
 
-    // Verifica disponibilidade e conflito de professor
     if (profId) {
         const prof = professores.find(p => p.id === profId);
         if (!prof) {
@@ -1811,8 +2781,58 @@ function salvarEdicaoAula(e) {
             return;
         }
 
-        if (!professorDisponivelNoHorario(prof, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId)) {
-            if (!confirm('Este professor não está disponível neste dia/turno/tempo. Deseja continuar mesmo assim?')) {
+            if (!professorDisponivelNoHorario(prof, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId)) {
+                const turno = aulaEmEdicao.turno;
+                const dia = aulaEmEdicao.dia;
+                const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+            const diasForaDisp = new Set();
+            aulas.forEach(a => {
+                if (a.professorId === profId && a.turno === turno) {
+                    if (!professorDisponivelNoHorario(prof, a.turno, a.dia, a.tempoId)) {
+                        diasForaDisp.add(a.dia);
+                    }
+                }
+            });
+            const diasComDisp = DIAS_SEMANA.filter(diaSigla =>
+                temposTurno.some(t => professorDisponivelNoHorario(prof, turno, diaSigla, t.id))
+            );
+
+            let msg = 'Este professor não está disponível neste dia/turno/tempo.\n\n';
+            if (diasComDisp.length && temposTurno.length) {
+                const pad = function (text, width) {
+                    text = String(text);
+                    if (text.length >= width) return text;
+                    return text + ' '.repeat(width - text.length);
+                };
+                msg += 'Disponibilidades deste professor no turno ' + turno + ':\n';
+                const colTempoWidth = 6;
+                const colDiaWidth = 12;
+                const headerTempo = pad('Tp', colTempoWidth);
+                const headerDias = diasComDisp.map(d => {
+                    let nome = textoDia(d).slice(0, 3);
+                    if (diasForaDisp.has(d)) {
+                        nome = '*' + nome + '*';
+                    }
+                    return pad(nome, colDiaWidth);
+                });
+                msg += headerTempo + ' | ' + headerDias.join(' | ') + '\n';
+                msg += ''.padEnd(headerTempo.length + 3 + headerDias.length * (colDiaWidth + 3) - 3, '-') + '\n';
+
+                temposTurno.forEach((t, idxTempo) => {
+                    const rotuloTempo = pad((idxTempo + 1) + 'º', colTempoWidth);
+                    const cols = diasComDisp.map(diaSigla =>
+                        professorDisponivelNoHorario(prof, turno, diaSigla, t.id)
+                            ? pad(t.inicio + '-' + t.fim, colDiaWidth)
+                            : pad('', colDiaWidth)
+                    );
+                    msg += rotuloTempo + ' | ' + cols.join(' | ') + '\n';
+                });
+            } else {
+                msg += 'Não há qualquer tempo disponível para este professor neste turno.\n';
+            }
+
+            msg += '\nDeseja continuar mesmo assim?';
+            if (!confirm(msg)) {
                 return;
             }
         }
@@ -1825,8 +2845,26 @@ function salvarEdicaoAula(e) {
         }
     }
 
+    const nomeDisciplinaNorm = (disc || '').toUpperCase();
+    const disciplinaSujeitaRegra =
+        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    if (disciplinaSujeitaRegra) {
+        const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
+            a.turmaId === aulaEmEdicao.turmaId &&
+            a.dia === aulaEmEdicao.dia &&
+            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+            a.id !== aulaEmEdicao.id
+        );
+        const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + 1;
+        const limite = 2;
+        if (totalFinalDiscDia > limite) {
+            mostrarToast(`Não é permitido lançar mais de ${limite} tempos da mesma disciplina no mesmo dia para esta turma.`, 'warning');
+            return;
+        }
+    }
+
     if (aulaEmEdicao.id === 'novo') {
-        // CRIAR NOVA AULA
+        capturarEstadoAulas();
         const novaAula = {
             id: gerarId(),
             turno: aulaEmEdicao.turno,
@@ -1839,9 +2877,9 @@ function salvarEdicaoAula(e) {
         aulas.push(novaAula);
         mostrarToast('Aula criada com sucesso!');
     } else {
-        // EDITAR AULA EXISTENTE
         const aula = aulas.find(a => a.id === aulaEmEdicao.id);
         if (aula) {
+            capturarEstadoAulas();
             aula.disciplina = disc;
             aula.professorId = profId;
             mostrarToast('Aula atualizada com sucesso!');
@@ -1860,7 +2898,7 @@ function excluirAulaModal() {
         return;
     }
     if (!confirm('Remover esta aula?')) return;
-
+    capturarEstadoAulas();
     aulas = aulas.filter(a => a.id !== aulaEmEdicao.id);
     salvarLocal();
     montarGradeTurno(turnoAtualGrade);
@@ -1880,6 +2918,7 @@ function limparTodasAulas() {
     if (!confirm('Apagar TODAS as aulas de todos os turnos, turmas e professores? Esta ação não pode ser desfeita.')) {
         return;
     }
+    capturarEstadoAulas();
     aulas = [];
     salvarLocal();
     montarGradeTurno(turnoAtualGrade);
@@ -1911,6 +2950,7 @@ function limparAulasTurma() {
     if (!confirm(`Remover ${aulasTurma.length} aula(s) da turma ${nomeTurma} (${labelTurno})?`)) {
         return;
     }
+    capturarEstadoAulas();
     aulas = aulas.filter(a => a.turmaId !== turmaId);
     salvarLocal();
     montarGradeTurno(turnoAtualGrade);
@@ -1946,6 +2986,7 @@ function limparAulasDiaSemana() {
     if (!confirm(`Remover ${aulasDia.length} aula(s) de ${labelDia} (${labelTurno})?`)) {
         return;
     }
+    capturarEstadoAulas();
     aulas = aulas.filter(a =>
         !(a.dia === dia && (turno === 'TODOS' || a.turno === turno))
     );
@@ -1970,29 +3011,68 @@ function ajusteInteligente() {
         return;
     }
 
-    // salva estado para desfazer
-    pilhaUndo.push(JSON.stringify(aulas));
+    capturarEstadoAulas();
 
     // só considera tempos não intervalos
     const temposValidos = getTempos(turnoAtualGrade).filter(t => !t.intervalo);
 
     turmasTurno.forEach(turma => {
         DIAS_SEMANA.forEach(dia => {
-            // pega as aulas do dia/turno/turma
-            const aulasDia = temposValidos.map(tempo =>
-                obterAula(turno, dia, turma.id, tempo.id) || null
-            );
-
-            // compacta (remove nulls)
-            const compactadas = aulasDia.filter(a => a !== null);
-
-            // remove todas as aulas antigas desse dia/turma/turno
+            const aulasDia = temposValidos.map(tempo => {
+                const aula = obterAula(turno, dia, turma.id, tempo.id) || null;
+                return aula;
+            });
+            const compactadasWrap = aulasDia
+                .map((a, idx) => a ? { aula: a, idxOriginal: idx } : null)
+                .filter(Boolean);
+            if (!compactadasWrap.length) {
+                return;
+            }
+            const ordemDisciplina = {};
+            compactadasWrap.forEach(w => {
+                const chave = (w.aula.disciplina || '').toUpperCase();
+                if (!(chave in ordemDisciplina)) {
+                    ordemDisciplina[chave] = w.idxOriginal;
+                }
+            });
+            compactadasWrap.sort((w1, w2) => {
+                const d1 = (w1.aula.disciplina || '').toUpperCase();
+                const d2 = (w2.aula.disciplina || '').toUpperCase();
+                const o1 = ordemDisciplina[d1] ?? w1.idxOriginal;
+                const o2 = ordemDisciplina[d2] ?? w2.idxOriginal;
+                if (o1 !== o2) return o1 - o2;
+                return w1.idxOriginal - w2.idxOriginal;
+            });
+            const contDiscDia = {};
+            compactadasWrap.forEach(w => {
+                const chave = (w.aula.disciplina || '').toUpperCase();
+                contDiscDia[chave] = (contDiscDia[chave] || 0) + 1;
+            });
+            const blocosMulti = compactadasWrap.filter(w => {
+                const chave = (w.aula.disciplina || '').toUpperCase();
+                return contDiscDia[chave] > 1;
+            });
+            const blocosSingle = compactadasWrap.filter(w => {
+                const chave = (w.aula.disciplina || '').toUpperCase();
+                return contDiscDia[chave] === 1;
+            });
+            const blocosMultiOrdenados = [...blocosMulti].sort((w1, w2) => {
+                const d1 = (w1.aula.disciplina || '').toUpperCase();
+                const d2 = (w2.aula.disciplina || '').toUpperCase();
+                const c1 = contDiscDia[d1] || 0;
+                const c2 = contDiscDia[d2] || 0;
+                if (c1 !== c2) return c2 - c1;
+                const o1 = ordemDisciplina[d1] ?? w1.idxOriginal;
+                const o2 = ordemDisciplina[d2] ?? w2.idxOriginal;
+                if (o1 !== o2) return o1 - o2;
+                return w1.idxOriginal - w2.idxOriginal;
+            });
+            const novaOrdem = blocosMultiOrdenados.concat(blocosSingle);
             aulas = aulas.filter(a =>
                 !(a.turno === turno && a.dia === dia && a.turmaId === turma.id)
             );
-
-            // reinsere nas primeiras posições de tempo, respeitando disponibilidade e conflitos de professor
-            compactadas.forEach((aula, idx) => {
+            novaOrdem.forEach((wrap, idx) => {
+                const aula = wrap.aula;
                 const novoTempo = temposValidos[idx];
                 if (novoTempo) {
                     let podeMover = true;
@@ -2070,20 +3150,32 @@ function ajusteInteligente() {
 }
 
 function desfazerAjuste() {
+    const turno = turnoAtualGrade;
     if (!pilhaUndo.length) {
-        mostrarToast('Não há ajuste para desfazer.', 'warning');
+        mostrarToast('Não há ação para desfazer neste turno.', 'warning');
         return;
     }
-    const estado = pilhaUndo.pop();
-    try {
-        aulas = JSON.parse(estado);
-        salvarLocal();
-        montarGradeTurno(turnoAtualGrade);
-        mostrarToast('Ajuste desfeito com sucesso!');
-    } catch (e) {
-        console.error('Erro ao desfazer ajuste:', e);
-        mostrarToast('Erro ao desfazer ajuste.', 'error');
+    let idx = pilhaUndo.length - 1;
+    while (idx >= 0) {
+        try {
+            const entry = JSON.parse(pilhaUndo[idx]);
+            if (entry && entry.turno === turno) {
+                pilhaUndo.splice(idx, 1);
+                aulas = aulas.filter(a => a.turno !== turno);
+                if (Array.isArray(entry.aulas)) {
+                    entry.aulas.forEach(a => aulas.push(a));
+                }
+                salvarLocal();
+                montarGradeTurno(turnoAtualGrade);
+                mostrarToast('Ação desfeita com sucesso neste turno.');
+                atualizarIndicadorDesfazerTurno();
+                return;
+            }
+        } catch (e) {
+        }
+        idx--;
     }
+    mostrarToast('Não há ação anterior registrada para este turno.', 'warning');
 }
 
 // =======================
@@ -2092,18 +3184,25 @@ function desfazerAjuste() {
 
 function preencherSelectCursoRelatorio() {
     const sel = document.getElementById('cursoRelatorio');
-    if (!sel) return;
-    sel.innerHTML = '<option value="">Selecione...</option>';
-    const optNa = document.createElement('option');
-    optNa.value = 'Não se aplica';
-    optNa.textContent = 'Não se aplica';
-    sel.appendChild(optNa);
-    cursos.forEach(curso => {
-        const opt = document.createElement('option');
-        opt.value = curso;
-        opt.textContent = curso;
-        sel.appendChild(opt);
-    });
+    const selFiltroCurso = document.getElementById('filtroCursoConsulta');
+    if (sel) {
+        sel.innerHTML = '';
+        cursos.forEach(curso => {
+            const opt = document.createElement('option');
+            opt.value = curso;
+            opt.textContent = curso;
+            sel.appendChild(opt);
+        });
+    }
+    if (selFiltroCurso) {
+        selFiltroCurso.innerHTML = '<option value="">Todos os cursos / áreas</option>';
+        cursos.forEach(curso => {
+            const opt = document.createElement('option');
+            opt.value = curso;
+            opt.textContent = curso;
+            selFiltroCurso.appendChild(opt);
+        });
+    }
 }
 
 function preencherSelectProfessorRelatorio() {
@@ -2298,7 +3397,7 @@ function gerarRelatorioTurnoPDF() {
     const chkOmitirSabado = document.getElementById('omitirSabadoRelatorios');
     const omitirSabado = !!(chkOmitirSabado && chkOmitirSabado.checked);
 
-    const turmasTurno = turmas.filter(t => t.turno === turno);
+    const turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
     if (!turmasTurno.length) {
         mostrarToast('Não há turmas neste turno.', 'warning');
         return;
@@ -2342,7 +3441,9 @@ function gerarRelatorioTurnoPDF() {
                         row.push('-');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
-                        const textoCelula = `${aula.disciplina}\n${prof ? prof.nome : ''}`;
+                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '');
+                        const nomeProfessor = prof ? prof.nome : '';
+                        const textoCelula = nomeProfessor ? `${nomeDisciplina}\n${nomeProfessor}` : nomeDisciplina;
                         if (layout === 'colorido' && prof && prof.cor) {
                             const rgb = hexToRgb(prof.cor);
                             if (rgb) {
@@ -2391,7 +3492,7 @@ function gerarRelatorioTurnoPDF() {
         },
         columnStyles: {
             0: { cellWidth: 10, cellPadding: 0 },
-            1: { cellWidth: 20 }
+            1: { cellWidth: 20, fontStyle: 'bold' }
         },
         didParseCell: function(data) {
             if (data.section === 'body' && data.column.index === 0) {
@@ -2463,7 +3564,7 @@ function gerarRelatorioTurnoXLS() {
 
     const turno = document.getElementById('turnoRelatorio').value;
     const layout = document.getElementById('layoutRelatorio').value;
-    const turmasTurno = turmas.filter(t => t.turno === turno);
+    const turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
     if (!turmasTurno.length) {
         mostrarToast('Não há turmas neste turno.', 'warning');
         return;
@@ -2492,8 +3593,9 @@ function gerarRelatorioTurnoXLS() {
                         row.push('');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
+                        const nomeDisc = apelidarDisciplina(aula.disciplina || '');
                         row.push(
-                            `${aula.disciplina}${prof ? ' - ' + prof.nome : ''}`
+                            `${nomeDisc}${prof ? ' - ' + prof.nome : ''}`
                         );
                     }
                 });
@@ -2567,32 +3669,39 @@ function gerarRelatorioTurnoXLS() {
 
 function gerarRelatorioCursoPDF() {
     const { jsPDF } = window.jspdf;
-    const curso = document.getElementById('cursoRelatorio').value;
+    const selCursos = document.getElementById('cursoRelatorio');
+    const cursosSelecionados = selCursos
+        ? Array.from(selCursos.selectedOptions).map(o => o.value).filter(v => v)
+        : [];
     const turno = document.getElementById('turnoRelatorioCurso').value;
     const layoutSel = document.getElementById('layoutRelatorioCurso');
     const layout = layoutSel ? layoutSel.value : 'compacto';
 
-    if (!curso) {
-        mostrarToast('Selecione um curso.', 'warning');
+    if (!cursosSelecionados.length) {
+        mostrarToast('Selecione ao menos um curso.', 'warning');
         return;
     }
 
-    const turmasCurso = turmas.filter(t => t.curso === curso && t.turno === turno);
-    if (!turmasCurso.length) {
-        mostrarToast(`Não há turmas do curso ${curso} no turno da ${textoTurno(turno).toLowerCase()}.`, 'warning');
+    const turmasSelecionadas = turmas
+        .filter(t => t.turno === turno && cursosSelecionados.includes(t.curso))
+        .sort(compararTurmasPorCursoETipo);
+
+    if (!turmasSelecionadas.length) {
+        mostrarToast('Não há turmas nos cursos/turno selecionados.', 'warning');
         return;
     }
 
-    const colCount = 2 + turmasCurso.map(t => t.nome).length;
+    const colCount = 2 + turmasSelecionadas.map(t => t.nome).length;
     const format = colCount > 12 ? 'a3' : 'a4';
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format });
 
-    const titulo = `HORÁRIO - CURSO ${curso.toUpperCase()} - TURNO DA ${textoTurno(turno).toUpperCase()} — Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`;
+    const listaCursosTitulo = cursosSelecionados.join(' • ');
+    const titulo = `HORÁRIO - CURSOS (${listaCursosTitulo}) - TURNO DA ${textoTurno(turno).toUpperCase()} — Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`;
     doc.setFont(undefined, 'bold');
     doc.setFontSize(8);
     doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 6, { align: 'center' });
 
-    const head = [['DIA', 'HORÁRIO', ...turmasCurso.map(t => t.nome)]];
+    const head = [['DIA', 'HORÁRIO', ...turmasSelecionadas.map(t => t.nome)]];
     const body = [];
 
     const chkOmitirSabado = document.getElementById('omitirSabadoRelatorioCurso');
@@ -2603,29 +3712,26 @@ function gerarRelatorioCursoPDF() {
         const temposTurno = getTempos(turno);
         temposTurno.forEach((tempo, idx) => {
             const row = [];
-            
-            // Coluna DIA com RowSpan
             if (idx === 0) {
-                row.push({ 
-                    content: textoDia(dia), 
+                row.push({
+                    content: textoDia(dia),
                     rowSpan: temposTurno.length,
-                    styles: { valign: 'middle', halign: 'center' } 
+                    styles: { valign: 'middle', halign: 'center' }
                 });
             }
-
-            // Remove a palavra INTERVALO da coluna de horário
             row.push(`${tempo.inicio} - ${tempo.fim}`);
-
             if (tempo.intervalo) {
-                turmasCurso.forEach(() => row.push('INTERVALO'));
+                turmasSelecionadas.forEach(() => row.push('INTERVALO'));
             } else {
-                turmasCurso.forEach(turma => {
+                turmasSelecionadas.forEach(turma => {
                     const aula = obterAula(turno, dia, turma.id, tempo.id);
                     if (!aula) {
                         row.push('-');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
-                        const textoCelula = `${aula.disciplina}\n${prof ? prof.nome : ''}`;
+                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '');
+                        const nomeProfessor = prof ? prof.nome : '';
+                        const textoCelula = nomeProfessor ? `${nomeDisciplina}\n${nomeProfessor}` : nomeDisciplina;
                         if (layout === 'colorido' && prof && prof.cor) {
                             const rgb = hexToRgb(prof.cor);
                             if (rgb) {
@@ -2642,7 +3748,6 @@ function gerarRelatorioCursoPDF() {
                     }
                 });
             }
-
             body.push(row);
         });
     });
@@ -2671,7 +3776,7 @@ function gerarRelatorioCursoPDF() {
         },
         columnStyles: {
             0: { cellWidth: 10, cellPadding: 0 },
-            1: { cellWidth: 20 }
+            1: { cellWidth: 20, fontStyle: 'bold' }
         },
         didParseCell: function(data) {
             if (data.section === 'body' && data.column.index === 0) {
@@ -2699,8 +3804,8 @@ function gerarRelatorioCursoPDF() {
         }
     });
 
-    doc.save(`horario_curso_${curso.toLowerCase().replace(/\s+/g, '_')}_${turno.toLowerCase()}.pdf`);
-    mostrarToast('PDF do curso gerado com sucesso!');
+    doc.save(`horario_cursos_${turno.toLowerCase()}.pdf`);
+    mostrarToast('PDF de cursos gerado com sucesso!');
 }
 
 function gerarRelatorioCursoXLS() {
@@ -2709,110 +3814,116 @@ function gerarRelatorioCursoXLS() {
         return;
     }
 
-    const curso = document.getElementById('cursoRelatorio').value;
+    const selCursos = document.getElementById('cursoRelatorio');
+    const cursosSelecionados = selCursos
+        ? Array.from(selCursos.selectedOptions).map(o => o.value).filter(v => v)
+        : [];
     const turno = document.getElementById('turnoRelatorioCurso').value;
     const layoutSel = document.getElementById('layoutRelatorioCurso');
     const layout = layoutSel ? layoutSel.value : 'compacto';
 
-    if (!curso) {
-        mostrarToast('Selecione um curso.', 'warning');
+    if (!cursosSelecionados.length) {
+        mostrarToast('Selecione ao menos um curso.', 'warning');
         return;
     }
 
-    const turmasCurso = turmas.filter(t => t.curso === curso && t.turno === turno);
-    if (!turmasCurso.length) {
-        mostrarToast(`Não há turmas do curso ${curso} no turno selecionado.`, 'warning');
-        return;
-    }
+    const wb = XLSX.utils.book_new();
 
-    const sheetData = [];
-    sheetData.push(['DIA', 'HORÁRIO', ...turmasCurso.map(t => t.nome)]);
+    cursosSelecionados.forEach(curso => {
+        const turmasCurso = turmas.filter(t => t.curso === curso && t.turno === turno);
+        if (!turmasCurso.length) {
+            return;
+        }
 
-    DIAS_SEMANA.forEach(dia => {
-        const temposTurno = getTempos(turno);
-        temposTurno.forEach(tempo => {
-            const row = [];
-            row.push(textoDia(dia));
-            row.push(`${tempo.inicio} - ${tempo.fim}`);
+        const sheetData = [];
+        sheetData.push(['DIA', 'HORÁRIO', ...turmasCurso.map(t => t.nome)]);
 
-            if (tempo.intervalo) {
-                turmasCurso.forEach(() => row.push('INTERVALO'));
-            } else {
-                turmasCurso.forEach(turma => {
+        DIAS_SEMANA.forEach(dia => {
+            const temposTurno = getTempos(turno);
+            temposTurno.forEach(tempo => {
+                const row = [];
+                row.push(textoDia(dia));
+                row.push(`${tempo.inicio} - ${tempo.fim}`);
+
+                if (tempo.intervalo) {
+                    turmasCurso.forEach(() => row.push('INTERVALO'));
+                } else {
+                    turmasCurso.forEach(turma => {
                     const aula = obterAula(turno, dia, turma.id, tempo.id);
                     if (!aula) {
                         row.push('');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
-                        row.push(`${aula.disciplina}${prof ? ' - ' + prof.nome : ''}`);
+                        const nomeDisc = apelidarDisciplina(aula.disciplina || '');
+                        row.push(`${nomeDisc}${prof ? ' - ' + prof.nome : ''}`);
                     }
-                });
-            }
+                    });
+                }
 
-            sheetData.push(row);
-        });
-    });
-
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(sheetData);
-    
-    const colWidths = turmasCurso.map(() => ({ wch: 18 }));
-    ws['!cols'] = [{ wch: 6 }, { wch: 12 }, ...colWidths];
-    
-    const rowsPerDia = getTempos(turno).length;
-    const merges = [];
-    DIAS_SEMANA.forEach((d, idxDia) => {
-        const r0 = 1 + idxDia * rowsPerDia;
-        const r1 = r0 + rowsPerDia - 1;
-        merges.push({ s: { r: r0, c: 0 }, e: { r: r1, c: 0 } });
-        const addr = XLSX.utils.encode_cell({ r: r0, c: 0 });
-        if (ws[addr]) {
-            ws[addr].s = Object.assign({}, ws[addr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
-        }
-    });
-    ws['!merges'] = merges;
-    const headDiaAddr = XLSX.utils.encode_cell({ r: 0, c: 0 });
-    if (ws[headDiaAddr]) {
-        ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
-    }
-    
-    if (layout === 'colorido') {
-        const toArgb = (hex) => {
-            const m = /^#?([a-fA-F0-9]{6})$/.exec(hex || '');
-            const h = m ? m[1] : '3498db';
-            const r = parseInt(h.slice(0, 2), 16);
-            const g = parseInt(h.slice(2, 4), 16);
-            const b = parseInt(h.slice(4, 6), 16);
-            const s = (n) => n.toString(16).padStart(2, '0').toUpperCase();
-            return 'FF' + s(r) + s(g) + s(b);
-        };
-        DIAS_SEMANA.forEach((dia, idxDia) => {
-            const temposTurno2 = getTempos(turno);
-            temposTurno2.forEach((tempo, idxTempo) => {
-                if (tempo.intervalo) return;
-                turmasCurso.forEach((turma, idxTurma) => {
-                    const aula = obterAula(turno, dia, turma.id, tempo.id);
-                    if (!aula) return;
-                    const prof = professores.find(p => p.id === aula.professorId);
-                    if (!prof || !prof.cor) return;
-                    const r = 1 + idxDia * rowsPerDia + idxTempo;
-                    const c = 2 + idxTurma;
-                    const addr = XLSX.utils.encode_cell({ r, c });
-                    if (ws[addr]) {
-                        ws[addr].s = Object.assign({}, ws[addr].s || {}, {
-                            fill: { fgColor: { rgb: toArgb(prof.cor).slice(2) } },
-                            font: { color: { rgb: 'FFFFFFFF' } },
-                            alignment: { horizontal: 'center', vertical: 'center' }
-                        });
-                    }
-                });
+                sheetData.push(row);
             });
         });
-    }
-    
-    XLSX.utils.book_append_sheet(wb, ws, 'Curso');
-    XLSX.writeFile(wb, `horario_curso_${curso.toLowerCase().replace(/\s+/g, '_')}_${turno.toLowerCase()}_${new Date().toISOString().slice(0,10)}.xlsx`);
-    mostrarToast('Excel do curso gerado com sucesso!');
+
+        const ws = XLSX.utils.aoa_to_sheet(sheetData);
+        const colWidths = turmasCurso.map(() => ({ wch: 18 }));
+        ws['!cols'] = [{ wch: 6 }, { wch: 12 }, ...colWidths];
+
+        const rowsPerDia = getTempos(turno).length;
+        const merges = [];
+        DIAS_SEMANA.forEach((d, idxDia) => {
+            const r0 = 1 + idxDia * rowsPerDia;
+            const r1 = r0 + rowsPerDia - 1;
+            merges.push({ s: { r: r0, c: 0 }, e: { r: r1, c: 0 } });
+            const addr = XLSX.utils.encode_cell({ r: r0, c: 0 });
+            if (ws[addr]) {
+                ws[addr].s = Object.assign({}, ws[addr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
+            }
+        });
+        ws['!merges'] = merges;
+        const headDiaAddr = XLSX.utils.encode_cell({ r: 0, c: 0 });
+        if (ws[headDiaAddr]) {
+            ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
+        }
+
+        if (layout === 'colorido') {
+            const toArgb = (hex) => {
+                const m = /^#?([a-fA-F0-9]{6})$/.exec(hex || '');
+                const h = m ? m[1] : '3498db';
+                const r = parseInt(h.slice(0, 2), 16);
+                const g = parseInt(h.slice(2, 4), 16);
+                const b = parseInt(h.slice(4, 6), 16);
+                const s = (n) => n.toString(16).padStart(2, '0').toUpperCase();
+                return 'FF' + s(r) + s(g) + s(b);
+            };
+            DIAS_SEMANA.forEach((dia, idxDia) => {
+                const temposTurno2 = getTempos(turno);
+                temposTurno2.forEach((tempo, idxTempo) => {
+                    if (tempo.intervalo) return;
+                    turmasCurso.forEach((turma, idxTurma) => {
+                        const aula = obterAula(turno, dia, turma.id, tempo.id);
+                        if (!aula) return;
+                        const prof = professores.find(p => p.id === aula.professorId);
+                        if (!prof || !prof.cor) return;
+                        const r = 1 + idxDia * rowsPerDia + idxTempo;
+                        const c = 2 + idxTurma;
+                        const addr = XLSX.utils.encode_cell({ r, c });
+                        if (ws[addr]) {
+                            ws[addr].s = Object.assign({}, ws[addr].s || {}, {
+                                fill: { fgColor: { rgb: toArgb(prof.cor).slice(2) } },
+                                font: { color: { rgb: 'FFFFFFFF' } },
+                                alignment: { horizontal: 'center', vertical: 'center' }
+                            });
+                        }
+                    });
+                });
+            });
+        }
+
+        XLSX.utils.book_append_sheet(wb, ws, curso.substring(0, 25));
+    });
+
+    XLSX.writeFile(wb, `horario_cursos_${turno.toLowerCase()}_${new Date().toISOString().slice(0,10)}.xlsx`);
+    mostrarToast('Excel de cursos gerado com sucesso!');
 }
 
 function gerarTabelaProfessor() {
@@ -2859,7 +3970,7 @@ function gerarTabelaProfessor() {
 
     if (!aulasProf.length && !incluirVagos) {
         if (tituloEl) tituloEl.textContent = `${legendaTabela} — ${baseLabel}`;
-        corpo.innerHTML = '<tr><td colspan="9" style="text-align:center;padding:20px;">Nenhum horário lançado para este professor.</td></tr>';
+        corpo.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:20px;">Nenhum horário lançado para este professor.</td></tr>';
         return;
     }
 
@@ -2874,6 +3985,22 @@ function gerarTabelaProfessor() {
             .map(a => a.disciplina)
             .filter(Boolean)
     )];
+
+    const cargaPorDisciplinaTurnoSemana = {};
+    aulasProf.forEach(a => {
+        if (!a || a._vago) return;
+        const disc = a.disciplina || '';
+        const turno = a.turno || '';
+        if (!disc || !turno) return;
+        const key = `${disc}__${turno}`;
+        if (!cargaPorDisciplinaTurnoSemana[key]) cargaPorDisciplinaTurnoSemana[key] = 0;
+        cargaPorDisciplinaTurnoSemana[key] += 1;
+    });
+    const cargaPorDisciplinaTurnoMes = {};
+    Object.keys(cargaPorDisciplinaTurnoSemana).forEach(key => {
+        const tempos = cargaPorDisciplinaTurnoSemana[key];
+        cargaPorDisciplinaTurnoMes[key] = tempos * 5;
+    });
 
     const grupos = {};
     aulasProf.forEach(a => {
@@ -2920,23 +4047,35 @@ function gerarTabelaProfessor() {
         });
     }
 
-    // Ordena as chaves: por dia da semana, depois por turno
+    // Ordena as chaves: por turno (Manhã, Tarde, Noite) e depois por dia da semana
     const chavesOrdenadas = Object.keys(grupos).sort((a, b) => {
         const [diaA, turnoA] = a.split('_');
         const [diaB, turnoB] = b.split('_');
-        
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[turnoA] || 99;
+        const tb = ordemTurno[turnoB] || 99;
+        if (ta !== tb) return ta - tb;
         const idxDiaA = DIAS_SEMANA.indexOf(diaA);
         const idxDiaB = DIAS_SEMANA.indexOf(diaB);
-        if (idxDiaA !== idxDiaB) return idxDiaA - idxDiaB;
-        
-        return TURNOS.indexOf(turnoA) - TURNOS.indexOf(turnoB);
+        return idxDiaA - idxDiaB;
     });
+
+    const linhasPorTurnoCH = {};
+    chavesOrdenadas.forEach(key => {
+        const [, turno] = key.split('_');
+        const qtd = (grupos[key] || []).length;
+        if (!qtd) return;
+        linhasPorTurnoCH[turno] = (linhasPorTurnoCH[turno] || 0) + qtd;
+    });
+    const turnosCHImpressos = new Set();
 
     let totalVagos = 0;
 
     chavesOrdenadas.forEach((chave, grupoIndex) => {
         const [dia, turno] = chave.split('_');
-        const aulasGrupo = (grupos[chave] || []).sort((a, b) => a.tempoId - b.tempoId);
+        const aulasGrupo = (grupos[chave] || []).slice().sort((a, b) => {
+            return (a.tempoId || 0) - (b.tempoId || 0);
+        });
         aulasGrupo.forEach((a, idx) => {
             if (a._vago) totalVagos++;
             const turma = turmas.find(t => t.id === a.turmaId);
@@ -3023,7 +4162,6 @@ function gerarTabelaProfessor() {
                 tr.appendChild(tdFase);
             }
             
-            // Disciplina
             const discNome = a.disciplina || '';
             const prevDisc = idx === 0 ? null : (aulasGrupo[idx - 1].disciplina || '');
             const isInicioRunDisc = idx === 0 || discNome !== prevDisc || a._vago || !!aulasGrupo[idx - 1]._vago;
@@ -3036,11 +4174,49 @@ function gerarTabelaProfessor() {
                     else break;
                 }
                 const tdDisciplina = document.createElement('td');
-                tdDisciplina.textContent = discNome;
+                tdDisciplina.textContent = apelidarDisciplina(discNome);
                 if (a._vago) tdDisciplina.style.fontStyle = 'italic';
                 tdDisciplina.rowSpan = spanDisc;
                 tdDisciplina.style.verticalAlign = 'middle';
+                tdDisciplina.style.whiteSpace = 'normal';
+                tdDisciplina.style.wordBreak = 'break-word';
                 tr.appendChild(tdDisciplina);
+            }
+            if (a._vago || !discNome || !turno) {
+                const tdHoraAula = document.createElement('td');
+                tdHoraAula.textContent = '';
+                tr.appendChild(tdHoraAula);
+            } else if (isInicioRunDisc) {
+                let spanHora = 1;
+                for (let j = idx + 1; j < aulasGrupo.length; j++) {
+                    const prox = aulasGrupo[j];
+                    const proxDisc = prox.disciplina || '';
+                    if (!prox._vago && proxDisc === discNome) {
+                        spanHora++;
+                    } else {
+                        break;
+                    }
+                }
+                const tdHoraAula = document.createElement('td');
+                const keyDiscTurno = `${discNome}__${turno}`;
+                const horasMesDisc = cargaPorDisciplinaTurnoMes[keyDiscTurno] || 0;
+                tdHoraAula.textContent = horasMesDisc ? `${horasMesDisc}h` : '';
+                tdHoraAula.style.textAlign = 'center';
+                tdHoraAula.rowSpan = spanHora;
+                tdHoraAula.style.verticalAlign = 'middle';
+                tr.appendChild(tdHoraAula);
+            }
+
+            if (!turnosCHImpressos.has(turno)) {
+                const tdCHTurno = document.createElement('td');
+                const infoTurno = (carga && carga.porTurno && carga.porTurno[turno]) ? carga.porTurno[turno] : null;
+                const horasMesTurno = infoTurno ? infoTurno.horasMes : 0;
+                tdCHTurno.textContent = horasMesTurno ? `${horasMesTurno}h` : '';
+                tdCHTurno.style.textAlign = 'center';
+                tdCHTurno.rowSpan = linhasPorTurnoCH[turno] || aulasGrupo.length;
+                tdCHTurno.style.verticalAlign = 'middle';
+                tr.appendChild(tdCHTurno);
+                turnosCHImpressos.add(turno);
             }
             
             corpo.appendChild(tr);
@@ -3048,38 +4224,56 @@ function gerarTabelaProfessor() {
         
         if (grupoIndex < chavesOrdenadas.length - 1) {
             const trSeparador = document.createElement('tr');
-            trSeparador.innerHTML = '<td colspan="9" style="background:#f5f5f5;height:1px;padding:0;"></td>';
+            trSeparador.innerHTML = '<td colspan="11" style="background:#f5f5f5;height:1px;padding:0;"></td>';
             corpo.appendChild(trSeparador);
         }
     });
 
-    const trResumo = document.createElement('tr');
-    const tdLabel = document.createElement('td');
-    tdLabel.colSpan = 4;
-    tdLabel.textContent = 'Total de tempos na semana';
-    const tdValor = document.createElement('td');
-    tdValor.colSpan = 5;
-    tdValor.textContent = `${carga.temposSemana} tempos (${carga.horasSemana}h semanais, aproximadamente ${carga.horasMes}h mensais)`;
-    trResumo.appendChild(tdLabel);
-    trResumo.appendChild(tdValor);
-    trResumo.style.fontWeight = '600';
-    corpo.appendChild(trResumo);
+    const resumoCargaEl = document.getElementById('profResumoCarga');
+    const resumoVagosEl = document.getElementById('profResumoVagos');
+    const partesTurno = [];
+    const porTurno = (carga && carga.porTurno) ? carga.porTurno : {};
+    ['MANHA', 'TARDE', 'NOITE'].forEach(turno => {
+        const info = porTurno[turno];
+        if (info && info.temposSemana) {
+            partesTurno.push(
+                `${textoTurno(turno)}: ${info.temposSemana} tempos (${info.horasSemana}h/sem, ${info.horasMes}h/mês)`
+            );
+        }
+    });
+    let resumoTexto = '';
+    if (partesTurno.length) {
+        resumoTexto = `Por turno: ${partesTurno.join(' | ')}. `;
+    }
+    resumoTexto += `Total: ${carga.temposSemana} tempos (${carga.horasSemana}h semanais, aproximadamente ${carga.horasMes}h mensais).`;
+    if (resumoCargaEl) {
+        resumoCargaEl.textContent = `Carga horária (por turno e total)  ${resumoTexto}`;
+    }
 
     if (totalVagos > 0 && incluirVagos) {
         const horasVagoSemana = totalVagos;
         const horasVagoMes = horasVagoSemana * 5;
-        const trVagos = document.createElement('tr');
-        const tdLabelV = document.createElement('td');
-        tdLabelV.colSpan = 4;
-        tdLabelV.textContent = 'Tempo vago na escola (entre aulas)';
-        const tdValorV = document.createElement('td');
-        tdValorV.colSpan = 5;
-        tdValorV.textContent = `${totalVagos} tempos (${horasVagoSemana}h semanais, aproximadamente ${horasVagoMes}h mensais)`;
-        trVagos.appendChild(tdLabelV);
-        trVagos.appendChild(tdValorV);
-        trVagos.style.fontStyle = 'italic';
-        corpo.appendChild(trVagos);
+        if (resumoVagosEl) {
+            resumoVagosEl.textContent =
+                `Tempo vago na escola (entre aulas)  ${totalVagos} tempos ` +
+                `(${horasVagoSemana}h semanais, aproximadamente ${horasVagoMes}h mensais)`;
+        }
+    } else if (resumoVagosEl) {
+        resumoVagosEl.textContent = '';
     }
+
+    const trTotalCHTurno = document.createElement('tr');
+    for (let i = 0; i < 10; i++) {
+        const tdVazio = document.createElement('td');
+        tdVazio.textContent = '';
+        trTotalCHTurno.appendChild(tdVazio);
+    }
+    const tdTotalCH = document.createElement('td');
+    const totalHorasTurnos = carga && typeof carga.horasMes === 'number' ? carga.horasMes : 0;
+    tdTotalCH.textContent = totalHorasTurnos ? `${totalHorasTurnos}h` : '';
+    tdTotalCH.style.fontWeight = '600';
+    trTotalCHTurno.appendChild(tdTotalCH);
+    corpo.appendChild(trTotalCHTurno);
 
     let mostrarGraficos = !chkGraficos || chkGraficos.checked;
     if (usuarioLogado && usuarioLogado.role === ROLES.COORD_TURNO) {
@@ -3111,17 +4305,102 @@ function preverImpressaoProfessor() {
         tituloOriginal = tituloEl.textContent;
         tituloEl.textContent = `Relatório do Professor ${prof.nome}`;
     }
+    document.body.classList.add('print-relatorios');
     window.print();
+    document.body.classList.remove('print-relatorios');
     if (tituloEl && tituloOriginal !== null) {
         tituloEl.textContent = tituloOriginal;
     }
 }
 
+function preverImpressaoConsulta() {
+    const tipo = document.getElementById('tipoConsulta')?.value || '';
+    const tabela = document.getElementById('tabelaConsulta');
+    if (!tabela) return;
+    const temConteudo = tabela.querySelector('tbody tr');
+    if (!temConteudo) {
+        mostrarToast('Gere a consulta antes de pré-visualizar a impressão.', 'warning');
+        return;
+    }
+    const tituloEl = document.querySelector('#consultas h2');
+    const tituloResultadoEl = document.getElementById('tituloResultadoConsulta');
+    const tituloOriginal = tituloEl ? tituloEl.textContent : null;
+    const resultadoOriginal = tituloResultadoEl ? tituloResultadoEl.textContent : null;
+    if (tituloEl) {
+        let desc = '';
+        if (tipo === 'professores') desc = 'por Professores';
+        else if (tipo === 'turmas') desc = 'por Turmas';
+        else if (tipo === 'turnos') desc = 'por Turnos';
+        else if (tipo === 'cursos') desc = 'por Cursos / Áreas';
+        tituloEl.textContent = desc ? `Consultas Avançadas ${desc}` : 'Consultas Avançadas';
+    }
+    if (tituloResultadoEl) {
+        let descTipo = '';
+        if (tipo === 'professores') descTipo = 'Professores';
+        else if (tipo === 'turmas') descTipo = 'Turmas';
+        else if (tipo === 'turnos') descTipo = 'Turnos';
+        else if (tipo === 'cursos') descTipo = 'Cursos / Áreas';
+        tituloResultadoEl.textContent = descTipo ? `Resultado - ${descTipo}` : 'Resultado';
+    }
+    document.body.classList.add('print-consultas');
+    window.print();
+    document.body.classList.remove('print-consultas');
+    if (tituloEl && tituloOriginal !== null) {
+        tituloEl.textContent = tituloOriginal;
+    }
+    if (tituloResultadoEl && resultadoOriginal !== null) {
+        tituloResultadoEl.textContent = resultadoOriginal;
+    }
+}
+
+function onChangeTipoConsulta() {
+    const tipo = document.getElementById('tipoConsulta')?.value || '';
+    const grupoBase = document.getElementById('filtroBaseProfGroup');
+    const selBase = document.getElementById('filtroBaseProfessor');
+    const grupoTurma = document.getElementById('filtroTurmaGroup');
+    const grupoTurno = document.getElementById('filtroTurnoGroup');
+    const grupoCurso = document.getElementById('filtroCursoGroup');
+    if (grupoBase) {
+        grupoBase.style.display = (tipo === 'professores' || tipo === 'disponibilidadeProfessores') ? '' : 'none';
+    }
+    if (tipo !== 'professores' && selBase) {
+        selBase.value = '';
+    }
+    if (grupoTurma) {
+        grupoTurma.style.display = tipo === 'turmas' ? '' : 'none';
+    }
+    if (grupoTurno) {
+        grupoTurno.style.display = (tipo === 'turnos' || tipo === 'disponibilidadeProfessores') ? '' : 'none';
+    }
+    if (grupoCurso) {
+        grupoCurso.style.display = tipo === 'cursos' ? '' : 'none';
+    }
+}
+
 function calcularCargaHorariaProfessor(aulasProf) {
-    const temposSemana = aulasProf.length;
+    const lista = Array.isArray(aulasProf) ? aulasProf : [];
+    const temposSemana = lista.length;
     const horasSemana = temposSemana;
     const horasMes = temposSemana * 5;
-    return { temposSemana, horasSemana, horasMes };
+
+    const temposPorTurno = {};
+    lista.forEach(a => {
+        if (!a || !a.turno) return;
+        if (!temposPorTurno[a.turno]) temposPorTurno[a.turno] = 0;
+        temposPorTurno[a.turno] += 1;
+    });
+
+    const porTurno = {};
+    Object.keys(temposPorTurno).forEach(turno => {
+        const tempos = temposPorTurno[turno];
+        porTurno[turno] = {
+            temposSemana: tempos,
+            horasSemana: tempos,
+            horasMes: tempos * 5
+        };
+    });
+
+    return { temposSemana, horasSemana, horasMes, porTurno };
 }
 
 function calcularTemposVagosProfessor(aulasProf, prof) {
@@ -3155,8 +4434,16 @@ function contarDiasDisponiveisProfessor(prof) {
     if (!prof) return 0;
     const disp = prof.disponibilidadePorDia || null;
     if (disp && typeof disp === 'object') {
-        const dias = Object.keys(disp).filter(dia => !!disp[dia]);
-        return dias.length;
+        let cont = 0;
+        DIAS_SEMANA.forEach(dia => {
+            const valor = disp[dia];
+            if (Array.isArray(valor)) {
+                if (valor.length > 0) cont++;
+            } else if (valor) {
+                cont++;
+            }
+        });
+        return cont;
     }
     const diasArr = Array.isArray(prof.diasDisponiveis) ? prof.diasDisponiveis : [];
     const diasValidos = diasArr.filter(d => DIAS_SEMANA.includes(d));
@@ -3344,9 +4631,24 @@ function atualizarGraficosProfessor(aulasProf) {
             `(${cargaTotal.horasSemana}h semanais, aproximadamente ${cargaTotal.horasMes}h mensais).`;
     }
     if (resumoTurnosEl) {
-        resumoTurnosEl.textContent =
+        const partesTurno = [];
+        const porTurno = (cargaTotal && cargaTotal.porTurno) ? cargaTotal.porTurno : {};
+        ['MANHA', 'TARDE', 'NOITE'].forEach(turno => {
+            const info = porTurno[turno];
+            if (info && info.temposSemana) {
+                partesTurno.push(
+                    `${textoTurno(turno)}: ${info.temposSemana} tempos (${info.horasSemana}h/sem, ${info.horasMes}h/mês)`
+                );
+            }
+        });
+        let textoTurnos = '';
+        if (partesTurno.length) {
+            textoTurnos = `Por turno: ${partesTurno.join(' | ')}. `;
+        }
+        textoTurnos +=
             `Total: ${cargaTotal.temposSemana} tempos na semana ` +
             `(${cargaTotal.horasSemana}h semanais, aproximadamente ${cargaTotal.horasMes}h mensais).`;
+        resumoTurnosEl.textContent = textoTurnos;
     }
     if (resumoMesEl) {
         resumoMesEl.textContent =
@@ -3436,10 +4738,13 @@ function gerarRelatorioProfessorPDF() {
     const chavesOrdenadas = Object.keys(grupos).sort((a, b) => {
         const [diaA, turnoA] = a.split('_');
         const [diaB, turnoB] = b.split('_');
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[turnoA] || 99;
+        const tb = ordemTurno[turnoB] || 99;
+        if (ta !== tb) return ta - tb;
         const idxDiaA = DIAS_SEMANA.indexOf(diaA);
         const idxDiaB = DIAS_SEMANA.indexOf(diaB);
-        if (idxDiaA !== idxDiaB) return idxDiaA - idxDiaB;
-        return TURNOS.indexOf(turnoA) - TURNOS.indexOf(turnoB);
+        return idxDiaA - idxDiaB;
     });
 
     const agoraPDF = new Date();
@@ -3461,10 +4766,26 @@ function gerarRelatorioProfessorPDF() {
         maxWidth: doc.internal.pageSize.getWidth() - 20
     });
 
-    const head = [['Dia', 'Turno', 'Horário', 'Tempo', 'Turma', 'Tipo', 'Ano', 'Fase', 'Disciplina']];
+    const head = [['Dia', 'Turno', 'Horário', 'Tempo', 'Turma', 'Tipo', 'Ano', 'Fase', 'Disciplina', 'C.H./Disciplina', 'C.H./Turno']];
     const body = [];
     const sepRows = new Set();
     let bodyRowIndex = 0;
+
+    const cargaPorDisciplinaTurnoSemana = {};
+    aulasProf.forEach(a => {
+        if (!a || a._vago) return;
+        const disc = a.disciplina || '';
+        const turnoAula = a.turno || '';
+        if (!disc || !turnoAula) return;
+        const key = `${disc}__${turnoAula}`;
+        if (!cargaPorDisciplinaTurnoSemana[key]) cargaPorDisciplinaTurnoSemana[key] = 0;
+        cargaPorDisciplinaTurnoSemana[key] += 1;
+    });
+    const cargaPorDisciplinaTurnoMes = {};
+    Object.keys(cargaPorDisciplinaTurnoSemana).forEach(key => {
+        const tempos = cargaPorDisciplinaTurnoSemana[key];
+        cargaPorDisciplinaTurnoMes[key] = tempos * 5;
+    });
 
     let totalVagos = 0;
 
@@ -3556,7 +4877,7 @@ function gerarRelatorioProfessorPDF() {
                 }
                 const discStyles = { valign: 'middle' };
                 if (a._vago) discStyles.fontStyle = 'italic';
-                discCell = { content: discNome, rowSpan: spanDisc, styles: discStyles };
+                discCell = { content: apelidarDisciplina(discNome), rowSpan: spanDisc, styles: discStyles };
             } else {
                 discCell = '';
             }
@@ -3569,6 +4890,11 @@ function gerarRelatorioProfessorPDF() {
                 ? { content: textoTurno(turno), _rowsGrupo: rowsGrupo, styles: { valign: 'middle' } }
                 : '';
 
+            const keyDiscTurno = (!isVago && discNome && turno) ? `${discNome}__${turno}` : null;
+            const horasMesDisc = keyDiscTurno ? (cargaPorDisciplinaTurnoMes[keyDiscTurno] || 0) : 0;
+            const infoTurno = (carga && carga.porTurno && carga.porTurno[turno]) ? carga.porTurno[turno] : null;
+            const horasMesTurno = infoTurno ? infoTurno.horasMes : 0;
+
             const row = [
                 diaCell,
                 turnoCell,
@@ -3578,7 +4904,9 @@ function gerarRelatorioProfessorPDF() {
                 tipoCell,
                 anoCell,
                 faseCell,
-                discCell
+                discCell,
+                (isVago || !discNome || !horasMesDisc) ? '' : `${horasMesDisc}h`,
+                horasMesTurno ? `${horasMesTurno}h` : ''
             ];
             
             body.push(row);
@@ -3595,9 +4923,9 @@ function gerarRelatorioProfessorPDF() {
 
     const disciplinasLabel =
         (disciplinasUsadas.length
-            ? disciplinasUsadas.join(', ')
+            ? disciplinasUsadas.map(d => apelidarDisciplina(d)).join(', ')
             : (Array.isArray(prof.disciplinas) && prof.disciplinas.length
-                ? prof.disciplinas.join(', ')
+                ? prof.disciplinas.map(d => apelidarDisciplina(d)).join(', ')
                 : 'Não informado'));
 
     const baseLabelPdf = prof.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
@@ -3638,7 +4966,8 @@ function gerarRelatorioProfessorPDF() {
             5: { cellWidth: 18 },
             6: { cellWidth: 12 },
             7: { cellWidth: 12 },
-            8: { cellWidth: 30, cellPadding: 1 }
+            8: { cellWidth: 26, cellPadding: 1 },
+            9: { cellWidth: 12, cellPadding: 1 }
         },
         didParseCell: function(data) {
             if (!data || !data.cell) return;
@@ -3655,7 +4984,7 @@ function gerarRelatorioProfessorPDF() {
                 if (colIdx === 0) {
                     data.cell.styles.fontSize = 8;
                 }
-                if (colIdx === 8) {
+                if (colIdx === 8 || colIdx === 9) {
                     data.cell.styles.fontSize = 8;
                 }
             }
@@ -3668,11 +4997,34 @@ function gerarRelatorioProfessorPDF() {
     const finalY = (doc.lastAutoTable && doc.lastAutoTable.finalY) ? doc.lastAutoTable.finalY : 28;
     doc.setFontSize(8);
     doc.setFont(undefined, 'normal');
-    doc.text(
-        `Total de tempos na semana: ${carga.temposSemana} tempos (${carga.horasSemana}h semanais, aproximadamente ${carga.horasMes}h mensais)`,
-        14,
-        finalY + 5
-    );
+
+    let yResumo = finalY + 5;
+    const porTurnoResumo = (carga && carga.porTurno) ? carga.porTurno : {};
+    const linhasTurnos = [];
+    ['MANHA', 'TARDE', 'NOITE'].forEach(turno => {
+        const info = porTurnoResumo[turno];
+        if (info && info.temposSemana) {
+            linhasTurnos.push(
+                `${textoTurno(turno)}: ${info.temposSemana} tempos (${info.horasSemana}h semanais, aproximadamente ${info.horasMes}h mensais)`
+            );
+        }
+    });
+
+    if (linhasTurnos.length) {
+        doc.text('Carga horária por turno:', 14, yResumo);
+        yResumo += 4;
+        linhasTurnos.forEach(linha => {
+            doc.text(linha, 16, yResumo);
+            yResumo += 4;
+        });
+    }
+
+    const textoTotal =
+        `Carga horária total: ${carga.temposSemana} tempos ` +
+        `(${carga.horasSemana}h semanais, aproximadamente ${carga.horasMes}h mensais).`;
+    doc.text(textoTotal, 14, yResumo);
+    yResumo += 4;
+
     if (incluirVagos && totalVagos > 0) {
         const horasVagoSemana = totalVagos;
         const horasVagoMes = horasVagoSemana * 5;
@@ -3680,14 +5032,16 @@ function gerarRelatorioProfessorPDF() {
         doc.text(
             `Tempo vago na escola (entre aulas): ${totalVagos} tempos (${horasVagoSemana}h semanais, aproximadamente ${horasVagoMes}h mensais).`,
             14,
-            finalY + 9
+            yResumo
         );
         doc.setFont(undefined, 'normal');
+        yResumo += 4;
     }
+
     doc.text(
         `Gerado em: ${dataPDF} às ${horaPDF}`,
         14,
-        finalY + 13
+        yResumo
     );
 
     if (incluirGraficos) {
@@ -3928,6 +5282,9 @@ function hexToRgb(hex) {
 function gerarConsulta() {
     const tipo = document.getElementById('tipoConsulta').value;
     const filtroBase = document.getElementById('filtroBaseProfessor')?.value || '';
+    const filtroTurmaId = document.getElementById('filtroTurmaConsulta')?.value || '';
+    const filtroTurno = document.getElementById('filtroTurnoConsulta')?.value || '';
+    const filtroCurso = document.getElementById('filtroCursoConsulta')?.value || '';
     const thead = document.querySelector('#tabelaConsulta thead');
     const tbody = document.querySelector('#tabelaConsulta tbody');
     if (!thead || !tbody) return;
@@ -3939,6 +5296,7 @@ function gerarConsulta() {
             <tr>
                 <th>Professor</th>
                 <th>Disciplinas</th>
+                <th>CH por disciplina</th>
                 <th>Total de Aulas</th>
                 <th>Turnos Atuantes</th>
                 <th>CH mensal (h)</th>
@@ -3950,7 +5308,15 @@ function gerarConsulta() {
             </tr>
         `;
         
-        professores.forEach(p => {
+        const ordenados = [...professores].sort((a, b) => {
+            const pesoBase = (x) => x.baseTipo === 'COMUM' ? 2 : 1;
+            const pa = pesoBase(a);
+            const pb = pesoBase(b);
+            if (pa !== pb) return pa - pb;
+            return (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' });
+        });
+
+            ordenados.forEach(p => {
             if (filtroBase && (p.baseTipo || 'TECNICA') !== filtroBase) {
                 return;
             }
@@ -3970,11 +5336,30 @@ function gerarConsulta() {
             if (!numDisciplinas && Array.isArray(p.disciplinas)) {
                 numDisciplinas = new Set(p.disciplinas.filter(Boolean)).size;
             }
+
+            const cargaPorDisciplinaMap = {};
+            aulasProfessor.forEach(a => {
+                const disc = a.disciplina || '';
+                if (!disc) return;
+                if (!cargaPorDisciplinaMap[disc]) cargaPorDisciplinaMap[disc] = 0;
+                cargaPorDisciplinaMap[disc] += 1;
+            });
+            const cargaPorDisciplinaTexto = Object.keys(cargaPorDisciplinaMap).length
+                ? Object.keys(cargaPorDisciplinaMap)
+                    .sort((d1, d2) => d1.localeCompare(d2, 'pt-BR', { sensitivity: 'base' }))
+                    .map(disc => {
+                        const tempos = cargaPorDisciplinaMap[disc];
+                        const horasMes = tempos * 5;
+                        return `${disc}: ${tempos} tempos (${horasMes}h/mês)`;
+                    })
+                    .join(' | ')
+                : '-';
             
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${p.nome}</strong></td>
                 <td>${disciplinasUsadas.join(', ') || '-'}</td>
+                <td style="text-align:left;">${cargaPorDisciplinaTexto}</td>
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${aulasProfessor.length}</span></td>
                 <td>${turnos.map(t => textoTurno(t)).join(', ') || '-'}</td>
                 <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${carga.horasMes}</span></td>
@@ -3987,6 +5372,73 @@ function gerarConsulta() {
             tbody.appendChild(tr);
         });
     } 
+    else if (tipo === 'disponibilidadeProfessores') {
+        thead.innerHTML = `
+            <tr>
+                <th>Professor</th>
+                <th>Base</th>
+                <th>Turno</th>
+                <th>Dia</th>
+                <th>Horários disponíveis</th>
+            </tr>
+        `;
+
+        const filtroBaseEfetivo = filtroBase || '';
+        const filtroTurnoEfetivo = filtroTurno || '';
+
+        const ordenados = [...professores].sort((a, b) =>
+            (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })
+        );
+
+        ordenados.forEach(p => {
+            const baseTipo = p.baseTipo || 'TECNICA';
+            if (filtroBaseEfetivo && baseTipo !== filtroBaseEfetivo) {
+                return;
+            }
+            const dispDia = p.disponibilidadePorDia || {};
+            DIAS_SEMANA.forEach(dia => {
+                const listaTurnosDia = Array.isArray(dispDia[dia]) ? dispDia[dia] : [];
+                if (!listaTurnosDia.length) {
+                    return;
+                }
+                const turnosParaDia = listaTurnosDia.filter(t => !filtroTurnoEfetivo || t === filtroTurnoEfetivo);
+                turnosParaDia.forEach(turno => {
+                    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+                    if (!temposTurno.length) return;
+
+                    const temposDisponiveis = temposTurno.filter(t => {
+                        if (!professorDisponivelNoHorario(p, turno, dia, t.id)) return false;
+                        const conflito = aulas.some(a =>
+                            a.professorId === p.id &&
+                            a.turno === turno &&
+                            a.dia === dia &&
+                            a.tempoId === t.id
+                        );
+                        if (conflito) return false;
+                        return true;
+                    });
+
+                    if (!temposDisponiveis.length) return;
+
+                    const labelTurno = textoTurno(turno);
+                    const labelDia = textoDia(dia);
+                    const descTempos = temposDisponiveis
+                        .map(t => etiquetaTempoAbrev(t, turno))
+                        .join(', ');
+
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td><strong>${p.nome}</strong></td>
+                        <td>${baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica'}</td>
+                        <td>${labelTurno}</td>
+                        <td>${labelDia}</td>
+                        <td>${descTempos}</td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            });
+        });
+    }
     else if (tipo === 'turmas') {
         thead.innerHTML = `
             <tr>
@@ -4002,57 +5454,83 @@ function gerarConsulta() {
             </tr>
         `;
         
+        // Aplica filtro de turma (todas ou turma específica)
+        const baseTurmas = filtroTurmaId
+            ? turmas.filter(t => t.id === filtroTurmaId)
+            : turmas.slice();
+
         // Agrupa turmas por curso
         const turmasPorCurso = {};
-        turmas.forEach(t => {
+        baseTurmas.forEach(t => {
             if (!turmasPorCurso[t.curso]) {
                 turmasPorCurso[t.curso] = [];
             }
             turmasPorCurso[t.curso].push(t);
         });
         
-        Object.keys(turmasPorCurso).forEach(curso => {
-            const turmasCurso = turmasPorCurso[curso];
-            
-            // Cabeçalho do grupo de curso
-            const trHeader = document.createElement('tr');
-            trHeader.className = 'curso-group-header';
-            trHeader.innerHTML = `
-                <td colspan="9" style="background-color:#e0e0e0; font-weight:bold; padding:8px;">
-                    ${curso} <span style="font-weight:normal; font-size:0.9em;">(${turmasCurso.length} turmas)</span>
-                </td>
-            `;
-            tbody.appendChild(trHeader);
-
-            // Agrupa por turno dentro do curso
-            const turmasPorTurno = {};
-            turmasCurso.forEach(t => {
-                if (!turmasPorTurno[t.turno]) turmasPorTurno[t.turno] = [];
-                turmasPorTurno[t.turno].push(t);
+        Object.keys(turmasPorCurso).sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' })).forEach(curso => {
+            const turmasCurso = turmasPorCurso[curso].slice().sort((t1, t2) => {
+                const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+                const ta = ordemTurno[t1.turno] || 99;
+                const tb = ordemTurno[t2.turno] || 99;
+                if (ta !== tb) return ta - tb;
+                return (t1.nome || '').localeCompare(t2.nome || '', 'pt-BR', { sensitivity: 'base' });
             });
 
-            Object.keys(turmasPorTurno).forEach(turno => {
-                const turmasDoTurno = turmasPorTurno[turno];
+            // Agrupa por turno e tipo dentro do curso
+            const turmasPorTurnoTipo = {};
+            turmasCurso.forEach(t => {
+                const key = `${t.turno || ''}__${t.tipoTurma || ''}`;
+                if (!turmasPorTurnoTipo[key]) turmasPorTurnoTipo[key] = [];
+                turmasPorTurnoTipo[key].push(t);
+            });
+
+            const chavesGrupo = Object.keys(turmasPorTurnoTipo).sort((ka, kb) => {
+                const [turnoA, tipoA] = ka.split('__');
+                const [turnoB, tipoB] = kb.split('__');
+                const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+                const ta = ordemTurno[turnoA] || 99;
+                const tb = ordemTurno[turnoB] || 99;
+                if (ta !== tb) return ta - tb;
+                return (textoTipoTurma(tipoA) || '').localeCompare(textoTipoTurma(tipoB) || '', 'pt-BR', { sensitivity: 'base' });
+            });
+
+            const totalLinhasCurso = chavesGrupo.reduce((acc, key) => acc + (turmasPorTurnoTipo[key] || []).length, 0);
+            let cursoCellCriado = false;
+
+            chavesGrupo.forEach(key => {
+                const [turno, tipoTurma] = key.split('__');
+                const turmasDoGrupo = turmasPorTurnoTipo[key];
                 
-                turmasDoTurno.forEach((t, idx) => {
+                turmasDoGrupo.forEach((t, idx) => {
                     const aulasTurma = aulas.filter(a => a.turmaId === t.id);
                     const totalAulas = aulasTurma.length;
                     const profsTurma = new Set(aulasTurma.map(a => a.professorId).filter(Boolean)).size;
                     const tr = document.createElement('tr');
                     
-                    // Coluna Curso (vazia pois já tem cabeçalho, ou merged se preferir layout tabela pura)
-                    // Aqui mantemos vazia para indentação visual sob o cabeçalho
-                    const tdCurso = document.createElement('td');
-                    tdCurso.style.border = 'none'; // visual mais limpo
-                    tr.appendChild(tdCurso);
+                    // Coluna Curso / Área (uma célula mesclada para o curso inteiro)
+                    if (!cursoCellCriado) {
+                        const tdCurso = document.createElement('td');
+                        tdCurso.rowSpan = totalLinhasCurso;
+                        tdCurso.style.verticalAlign = 'middle';
+                        tdCurso.style.fontWeight = 'bold';
+                        tdCurso.style.textAlign = 'center';
+                        tdCurso.innerHTML = `
+                            <div>${curso}</div>
+                            <div style="font-size:0.85em;font-weight:normal;">(${turmasCurso.length} turmas)</div>
+                        `;
+                        tr.appendChild(tdCurso);
+                        cursoCellCriado = true;
+                    }
 
-                    // Coluna Turno (apenas na primeira do grupo)
+                    // Coluna Turno (apenas na primeira do grupo de turno/tipo)
                     const tdTurno = document.createElement('td');
                     if (idx === 0) {
                         tdTurno.textContent = textoTurno(turno);
-                        tdTurno.rowSpan = turmasDoTurno.length;
+                        tdTurno.rowSpan = turmasDoGrupo.length;
                         tdTurno.style.verticalAlign = 'middle';
                         tdTurno.style.fontWeight = 'bold';
+                        tdTurno.style.textAlign = 'left';
                         tr.appendChild(tdTurno);
                     } else if (idx === 0) { 
                         // nunca entra aqui, mas garante logica
@@ -4061,11 +5539,17 @@ function gerarConsulta() {
                     // Turma
                     const tdTurma = document.createElement('td');
                     tdTurma.innerHTML = `<strong>${t.nome}</strong>`;
+                    tdTurma.style.textAlign = 'left';
                     tr.appendChild(tdTurma);
 
                     const tdTipo = document.createElement('td');
-                    tdTipo.textContent = textoTipoTurma(t.tipoTurma) || '-';
-                    tr.appendChild(tdTipo);
+                    if (idx === 0) {
+                        tdTipo.textContent = textoTipoTurma(tipoTurma) || '-';
+                        tdTipo.rowSpan = turmasDoGrupo.length;
+                        tdTipo.style.verticalAlign = 'middle';
+                        tdTipo.style.fontWeight = 'bold';
+                        tr.appendChild(tdTipo);
+                    }
 
                     const tdAno = document.createElement('td');
                     tdAno.textContent = textoAnoTurma(t.anoTurma) || '-';
@@ -4091,11 +5575,6 @@ function gerarConsulta() {
                     tbody.appendChild(tr);
                 });
             });
-            
-            // Espaço entre cursos
-            const trEspaco = document.createElement('tr');
-            trEspaco.innerHTML = '<td colspan="9" style="height:10px; border:none;"></td>';
-            tbody.appendChild(trEspaco);
         });
     } 
     else if (tipo === 'turnos') {
@@ -4109,7 +5588,8 @@ function gerarConsulta() {
             </tr>
         `;
         
-        TURNOS.forEach(turno => {
+        const turnosParaExibir = filtroTurno ? [filtroTurno] : TURNOS;
+        turnosParaExibir.forEach(turno => {
             const turmasTurno = turmas.filter(t => t.turno === turno);
             const idsTurmas = turmasTurno.map(t => t.id);
             const aulasTurno = aulas.filter(a => idsTurmas.includes(a.turmaId));
@@ -4141,7 +5621,8 @@ function gerarConsulta() {
             </tr>
         `;
         
-        cursos.forEach(curso => {
+        const cursosParaExibir = filtroCurso ? cursos.filter(c => c === filtroCurso) : cursos;
+        cursosParaExibir.forEach(curso => {
             const turmasCurso = turmas.filter(t => t.curso === curso);
             const turmasManha = turmasCurso.filter(t => t.turno === 'MANHA').length;
             const turmasTarde = turmasCurso.filter(t => t.turno === 'TARDE').length;
@@ -4301,6 +5782,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const formNovoCurso = document.getElementById('formNovoCurso');
     if (formNovoCurso) formNovoCurso.addEventListener('submit', salvarNovoCurso);
 
+    const formApelido = document.getElementById('formApelidoDisciplina');
+    if (formApelido) formApelido.addEventListener('submit', salvarApelidoDisciplina);
+
     // modal de aula
     const formModal = document.getElementById('formModalAula');
     if (formModal) formModal.addEventListener('submit', salvarEdicaoAula);
@@ -4328,6 +5812,7 @@ document.addEventListener('DOMContentLoaded', () => {
     preencherSelectCursoVisual();
     atualizarListaProfessores();
     atualizarListaTurmas();
+    preencherSelectDisciplinasApelido();
     atualizarChipsTempos();
     montarGradeTurno(turnoAtualGrade);
     preencherSelectCursoRelatorio();
@@ -4346,7 +5831,30 @@ document.addEventListener('DOMContentLoaded', () => {
         chkMostrarInstrucoesEditor.addEventListener('change', () => mostrarHintEditorTurno());
         mostrarHintEditorTurno();
     }
-    
+    atualizarIndicadorDesfazerTurno();
+
+    const selTipoConsulta = document.getElementById('tipoConsulta');
+    if (selTipoConsulta) {
+        onChangeTipoConsulta();
+    }
+
+    const rapidoTurno = document.getElementById('rapidoTurno');
+    if (rapidoTurno) {
+        rapidoTurno.addEventListener('change', () => {
+            atualizarSelectTurmasInsercaoRapida();
+            const valor = rapidoTurno.value;
+            if (valor) {
+                const group = document.getElementById('chips-turno-visual');
+                const btn = group ? group.querySelector(`.chip[data-value="${valor}"]`) : null;
+                if (btn) {
+                    mudarTurnoVisual(btn);
+                }
+            }
+        });
+    }
+
+    atualizarSelectTurmasInsercaoRapida();
+
     // Auto-preencher disciplina ao selecionar professor no Editor de Horários
     const selectProfHorario = document.getElementById('professorHorario');
     if (selectProfHorario) {
@@ -4582,7 +6090,9 @@ function renderDisponibilidade(containerId, dados = null, diasLegacy = [], turno
         const target = e.target;
         if (target && target.matches('input[type="checkbox"][data-dia][data-turno][data-tipo="turno"]')) {
             const dia = target.getAttribute('data-dia');
-            renderTemposDia(containerId, dia, coletarDisponibilidade(containerId), null);
+            const dispAtual = coletarDisponibilidade(containerId);
+            const temposAtuais = coletarTemposDisponibilidade(containerId);
+            renderTemposDia(containerId, dia, dispAtual, temposAtuais);
         }
     });
 }
@@ -4607,7 +6117,8 @@ function renderTemposDia(containerId, dia, disp = null, temposMap = null) {
     turnos.forEach(t => {
         const ativo = disp && disp[dia] ? disp[dia].includes(t) : false;
         if (!ativo) return;
-        const lista = temposMap && temposMap[dia] && temposMap[dia][t] ? temposMap[dia][t] : getTempos(t).filter(x=>!x.intervalo).map(x=>x.id);
+        const temMapa = temposMap && temposMap[dia] && Array.isArray(temposMap[dia][t]) && temposMap[dia][t].length > 0;
+        const lista = temMapa ? temposMap[dia][t] : getTempos(t).filter(x=>!x.intervalo).map(x=>x.id);
         const row = document.createElement('div');
         row.className = 'turno-tempos-row';
         const lblTurno = document.createElement('div');
