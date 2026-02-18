@@ -9,8 +9,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.4/jspdf.plugin.autotable.min.js"></script>
 
-    <!-- XLSX para exportar em Excel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    <!-- XLSX para exportar em Excel (versão com suporte a estilos) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
 
     <!-- Chart.js para gráficos -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
@@ -111,15 +111,21 @@
                     <h3>Cadastrar / Editar Professor</h3>
                     <form id="formProfessor" class="form-grid">
                         <input type="hidden" id="professorId">
-                        <div class="form-group">
-                            <label for="nomeProfessor">Nome:</label>
-                            <input type="text" id="nomeProfessor" required>
-                        </div>
-                        <div class="form-group">
-                            <label for="disciplinasProfessor">
-                                Disciplinas <span class="label-help">(separadas por vírgula)</span>:
-                            </label>
-                            <input type="text" id="disciplinasProfessor" placeholder="Matemática, Física, ...">
+                        <div class="form-group full-row">
+                            <div class="inline-group prof-top-row">
+                                <div class="prof-top-field">
+                                    <label for="nomeProfessor">Nome:</label>
+                                    <input type="text" id="nomeProfessor" required>
+                                </div>
+                                <div class="prof-top-field">
+                                    <label for="disciplinasProfessor">Disciplina</label>
+                                    <input type="text" id="disciplinasProfessor" class="prof-input-text" placeholder="Matemática, Física, ...">
+                                </div>
+                                <div class="prof-top-field">
+                                    <label for="apelidoProfessorDisciplina">Apelido da disciplina</label>
+                                    <input type="text" id="apelidoProfessorDisciplina" class="prof-input-text" placeholder="Apelidar disciplina">
+                                </div>
+                            </div>
                         </div>
                         <div class="form-group">
                             <label for="corProfessor">Cor de identificação:</label>
@@ -139,10 +145,33 @@
                             <label>Disponibilidade por dia/turno:</label>
                             <div id="dispProfessor" class="disp-grid"></div>
                         </div>
-                        <!-- tempos por dia/turno agora aparecem logo abaixo de cada dia dentro da própria grade -->
-                        <!-- seção de tempos gerais removida; tempos são definidos por dia/turno acima -->
                         <div class="form-group full-row">
                             <button type="submit" class="btn-primary">💾 Salvar Professor</button>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <h3>Atualizar disciplina (opcional)</h3>
+                    <form id="formApelidoDisciplina" class="form-grid">
+                        <div class="form-group">
+                            <label for="disciplinaApelidoSelect">Disciplina:</label>
+                            <select id="disciplinaApelidoSelect">
+                                <option value="">Selecione...</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="apelidoDisciplinaInput">Apelido:</label>
+                            <div class="inline-group">
+                                <input type="text" id="apelidoDisciplinaInput" placeholder="Ex.: PORT, GER. B. DADOS" style="flex:1;">
+                                <label style="display:inline-flex; align-items:center; gap:4px;">
+                                    <input type="checkbox" id="removerApelidoDisciplinaCheckbox" onchange="toggleRemoverApelidoDisciplina(this)">
+                                    Retirar apelido
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <button type="submit" class="btn-primary">💾 Salvar Apelido</button>
                         </div>
                     </form>
                 </div>
@@ -224,31 +253,6 @@
                                 <input type="text" id="descricaoTurma" placeholder="Ex.: VI Fase • 2025.2" style="flex: 1;">
                                 <button type="submit" class="btn-primary">💾 Salvar Turma</button>
                             </div>
-                        </div>
-                    </form>
-                </div>
-
-                <div class="card">
-                    <h3>Apelidar Disciplina (opcional)</h3>
-                    <form id="formApelidoDisciplina" class="form-grid">
-                        <div class="form-group">
-                            <label for="disciplinaApelidoSelect">Disciplina:</label>
-                            <select id="disciplinaApelidoSelect">
-                                <option value="">Selecione...</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="apelidoDisciplinaInput">Apelido:</label>
-                            <div class="inline-group">
-                                <input type="text" id="apelidoDisciplinaInput" placeholder="Ex.: PORT, GER. B. DADOS" style="flex:1;">
-                                <label style="display:inline-flex; align-items:center; gap:4px;">
-                                    <input type="checkbox" id="removerApelidoDisciplinaCheckbox" onchange="toggleRemoverApelidoDisciplina(this)">
-                                    Retirar apelido
-                                </label>
-                            </div>
-                        </div>
-                        <div class="form-group">
-                            <button type="submit" class="btn-primary">💾 Salvar Apelido</button>
                         </div>
                     </form>
                 </div>
@@ -394,7 +398,7 @@
                         </div>
                         <div class="filtros-grade-group">
                             <label style="display:inline-flex; align-items:center; gap:4px;">
-                                <input type="checkbox" id="chkOmitirSabadoGrade" onclick="montarGradeTurno(turnoAtualGrade)">
+                                <input type="checkbox" id="chkOmitirSabadoGrade" onclick="montarGradeTurno(turnoAtualGrade)" checked>
                                 Ocultar sábado
                             </label>
                         </div>
@@ -402,7 +406,9 @@
 
                     <div class="editor-actions">
                         <button type="button" class="btn-primary" onclick="ajusteInteligente()">🧠 Ajuste Inteligente</button>
+                        <button type="button" class="btn-secondary" onclick="verificarConflitosTurno()">🔍 Verificar Conflitos</button>
                         <button type="button" class="btn-secondary" id="btnDesfazerTurno" onclick="desfazerAjuste()">↩️ Desfazer</button>
+                        <button type="button" class="btn-secondary" id="btnRefazerTurno" onclick="refazerAjuste()">↪️ Refazer</button>
                         <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Backup</button>
                         <input type="file" id="importBackup" accept=".json" style="display: none;" onchange="importarBackup(event)">
                         <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Backup</button>
@@ -424,9 +430,8 @@
                                 </select>
                             </div>
                             <div class="form-group">
-                                <label for="rapidoTurma">Turma:</label>
-                                <select id="rapidoTurma">
-                                    <option value="">Selecione...</option>
+                                <label for="rapidoTurma">Turmas:</label>
+                                <select id="rapidoTurma" multiple size="5">
                                 </select>
                             </div>
                             <div class="form-group">
@@ -758,7 +763,9 @@
                                 <option value="turmas">Turmas</option>
                                 <option value="turnos">Turnos</option>
                                 <option value="cursos">Cursos / Áreas</option>
-                                <option value="disponibilidadeProfessores">Disponibilidade dos professores</option>
+                                <option value="disponibilidadeProfessores">Tempos disponíveis dos Professores</option>
+                                <option value="disponibilidadeProfessoresInformada">Disponibilidade dos Professores Informada</option>
+                                <option value="tempoProfessoresSala">Tempo dos Professores em Sala</option>
                             </select>
                         </div>
                         <div class="form-group" id="filtroBaseProfGroup">
@@ -790,7 +797,13 @@
                                 <option value="">Todos os cursos / áreas</option>
                             </select>
                         </div>
-                        <div class="form-group">
+                        <div class="form-group" id="filtroOpcoesConsultaGroup">
+                            <label>Opções:</label>
+                            <div class="inline-group">
+                                <label><input type="checkbox" id="ocultarCHJanelasConsulta"> Ocultar coluna "CH em janelas (h/mês)"</label>
+                            </div>
+                        </div>
+                        <div class="form-group full-row">
                             <div class="inline-group">
                                 <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
                                 <button class="btn-secondary" type="button" onclick="preverImpressaoConsulta()">🖨️ Pré-visualizar impressão</button>
@@ -850,14 +863,18 @@
                 <input type="text" id="modalHorario" readonly>
             </div>
             <div class="form-group">
-                <label for="modalDisciplina">Disciplina:</label>
-                <input type="text" id="modalDisciplina">
-            </div>
-            <div class="form-group">
                 <label for="modalProfessor">Professor:</label>
                 <select id="modalProfessor">
                     <option value="">Selecione...</option>
                 </select>
+            </div>
+            <div class="form-group">
+                <label for="modalDisciplina">Disciplina:</label>
+                <input type="text" id="modalDisciplina">
+            </div>
+            <div class="form-group">
+                <label for="modalApelidoDisciplina">Apelido da disciplina:</label>
+                <input type="text" id="modalApelidoDisciplina">
             </div>
             <div class="form-group modal-aula-actions">
                 <button type="button" class="btn-danger" id="btnExcluirAulaModal">Excluir aula</button>

@@ -341,6 +341,10 @@ header {
     flex-shrink: 0;
 }
 
+.inline-group-prof-disciplinas {
+    align-items: flex-end;
+}
+
 .turma-edit-row td {
     background: #f9fbfe;
 }
@@ -354,6 +358,25 @@ header {
 
 .prof-edit-row td {
     background: #f9fbfe;
+}
+
+.prof-input-text {
+    width: 220px;
+    max-width: 100%;
+}
+
+.prof-top-row {
+    width: 100%;
+    justify-content: flex-start;
+    align-items: flex-end;
+    gap: 16px;
+}
+
+.prof-top-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
 }
 
 .inline-editor .form-group label {
@@ -461,6 +484,16 @@ button.small {
 #tabelaConsulta th:first-child,
 #tabelaConsulta td:first-child {
     text-align: center;
+}
+
+#tabelaProfessor th:nth-child(5),
+#tabelaProfessor td:nth-child(5),
+#tabelaProfessor th:nth-child(6),
+#tabelaProfessor td:nth-child(6),
+#tabelaProfessor th:nth-child(9),
+#tabelaProfessor td:nth-child(9) {
+    white-space: nowrap;
+    width: 110px;
 }
 
 #tabelaProfessor th:nth-child(10),

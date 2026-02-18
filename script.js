@@ -44,6 +44,8 @@ let TEMPOS_POR_TURNO = {
     ]
 };
 
+let ORDEM_TURMAS_POR_TURNO = {};
+
 function getTempos(turno) {
     return TEMPOS_POR_TURNO[turno] || TEMPOS_POR_TURNO.MANHA;
 }
@@ -70,6 +72,8 @@ let professores = [];
 let turmas = [];
 let aulas = [];
 
+const CURSO_TEMPO_INTEGRAL = 'Tempo Integral';
+
 const ROLES = {
     ADMIN: 'ADMIN',
     COORD_TURNO: 'COORD_TURNO'
@@ -87,11 +91,11 @@ const USUARIOS_FIXOS = [
 
 let usuarioLogado = null;
 
-// Controle do editor visual / ajuste inteligente
 let turnoAtualGrade = 'MANHA';
 let modoVisualGrade = 'TURNO';
 let cursoVisualGrade = '';
 let pilhaUndo = [];
+let pilhaRedo = [];
 
 // Controle do modal de edição de aula
 let aulaEmEdicao = null;
@@ -106,6 +110,258 @@ const PALETA_GRAFICOS = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', 
 // Cache para otimização
 let cacheGrade = {};
 let dadosModificados = false;
+let melhorPercentualAjustePorTurno = {};
+let gradeCelulasSelecionadas = [];
+let clipboardAulas = [];
+let clipboardModo = null;
+let menuContextoGrade = null;
+let menuContextoTimeout = null;
+
+function limparSelecaoGrade() {
+    gradeCelulasSelecionadas.forEach(td => {
+        td.style.outline = '';
+        td.style.outlineOffset = '';
+    });
+    gradeCelulasSelecionadas = [];
+}
+
+function alternarSelecaoCelula(td) {
+    if (!td) return;
+    const idx = gradeCelulasSelecionadas.indexOf(td);
+    if (idx >= 0) {
+        gradeCelulasSelecionadas.splice(idx, 1);
+        td.style.outline = '';
+        td.style.outlineOffset = '';
+    } else {
+        gradeCelulasSelecionadas.push(td);
+        td.style.outline = '2px solid #2980b9';
+        td.style.outlineOffset = '-2px';
+    }
+}
+
+function obterAulasDasCelulas(celulas) {
+    if (!celulas || !celulas.length) return [];
+    const lista = [];
+    celulas.forEach(td => {
+        const turno = td.dataset.turno;
+        const dia = td.dataset.dia;
+        const turmaId = td.dataset.turmaId;
+        const tempoId = parseInt(td.dataset.tempoId, 10);
+        const aula = obterAula(turno, dia, turmaId, tempoId);
+        if (aula) {
+            lista.push(aula);
+        }
+    });
+    return lista;
+}
+
+function fecharMenuContextoGrade() {
+    if (menuContextoGrade) {
+        menuContextoGrade.style.display = 'none';
+    }
+    if (menuContextoTimeout) {
+        clearTimeout(menuContextoTimeout);
+        menuContextoTimeout = null;
+    }
+}
+
+function abrirMenuContextoGrade(ev, td) {
+    if (!td) return;
+    if (!ev.ctrlKey && gradeCelulasSelecionadas.length === 0) {
+        limparSelecaoGrade();
+        alternarSelecaoCelula(td);
+    } else if (!ev.ctrlKey && gradeCelulasSelecionadas.indexOf(td) === -1) {
+        limparSelecaoGrade();
+        alternarSelecaoCelula(td);
+    }
+    if (!menuContextoGrade) {
+        menuContextoGrade = document.createElement('div');
+        menuContextoGrade.style.position = 'fixed';
+        menuContextoGrade.style.zIndex = '9999';
+        menuContextoGrade.style.background = '#ffffff';
+        menuContextoGrade.style.border = '1px solid #ccc';
+        menuContextoGrade.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
+        menuContextoGrade.style.minWidth = '140px';
+        menuContextoGrade.style.fontSize = '0.85rem';
+        document.body.appendChild(menuContextoGrade);
+    }
+    const destinos = gradeCelulasSelecionadas.length ? [...gradeCelulasSelecionadas] : [td];
+    const aulasSelecionadas = obterAulasDasCelulas(destinos);
+    const podeCopiar = aulasSelecionadas.length > 0;
+    const podeRecortar = aulasSelecionadas.length > 0;
+    const podeExcluir = aulasSelecionadas.length > 0;
+    const podeColar = clipboardAulas && clipboardAulas.length > 0;
+    const criarItem = (rotulo, habilitado, acao) => {
+        const item = document.createElement('div');
+        item.textContent = rotulo;
+        item.style.padding = '6px 10px';
+        item.style.cursor = habilitado ? 'pointer' : 'default';
+        item.style.color = habilitado ? '#333' : '#aaa';
+        item.onmouseenter = () => {
+            if (habilitado) item.style.background = '#f0f0f0';
+        };
+        item.onmouseleave = () => {
+            item.style.background = 'transparent';
+        };
+        if (habilitado) {
+            item.onclick = () => {
+                fecharMenuContextoGrade();
+                acao();
+            };
+        }
+        menuContextoGrade.appendChild(item);
+    };
+    menuContextoGrade.innerHTML = '';
+    criarItem('Copiar', podeCopiar, () => {
+        clipboardModo = 'copy';
+        clipboardAulas = aulasSelecionadas.map(a => ({ ...a }));
+    });
+    criarItem('Recortar', podeRecortar, () => {
+        if (!aulasSelecionadas.length) return;
+        clipboardModo = 'cut';
+        clipboardAulas = aulasSelecionadas.map(a => ({ ...a }));
+    });
+    criarItem('Excluir aula', podeExcluir, () => {
+        if (!aulasSelecionadas.length) return;
+        if (!confirm('Deseja excluir a(s) aula(s) selecionada(s)?')) return;
+        capturarEstadoAulas();
+        const aulasParaExcluir = [];
+        aulasSelecionadas.forEach(sel => {
+            const mesmas = aulas.filter(a =>
+                a.turno === sel.turno &&
+                a.dia === sel.dia &&
+                a.turmaId === sel.turmaId &&
+                a.tempoId === sel.tempoId
+            );
+            mesmas.forEach(a => {
+                if (!aulasParaExcluir.some(x => x.id === a.id)) {
+                    aulasParaExcluir.push(a);
+                }
+            });
+        });
+        const ids = new Set(aulasParaExcluir.map(a => a.id));
+        aulas = aulas.filter(a => !ids.has(a.id));
+        salvarLocal();
+        montarGradeTurno(turnoAtualGrade);
+    });
+    criarItem('Colar', podeColar, () => {
+        if (!clipboardAulas || !clipboardAulas.length) return;
+        const destinosPaste = gradeCelulasSelecionadas.length ? [...gradeCelulasSelecionadas] : [td];
+        const backupAulas = JSON.stringify(aulas);
+        const backupClipboardModo = clipboardModo;
+        const backupClipboardAulas = JSON.stringify(clipboardAulas);
+        let operacaoFalhou = false;
+        capturarEstadoAulas();
+        let aulasUsadasCut = [];
+        try {
+            let avisouPortMat = false;
+            let idx = 0;
+            for (let i = 0; i < destinosPaste.length && idx < clipboardAulas.length; i++) {
+                const cel = destinosPaste[i];
+                const base = clipboardAulas[idx];
+                idx++;
+                const turno = cel.dataset.turno;
+                const dia = cel.dataset.dia;
+                const turmaId = cel.dataset.turmaId;
+                const tempoId = parseInt(cel.dataset.tempoId, 10);
+                const profId = base.professorId || null;
+                if (profId) {
+                    const prof = professores.find(p => p.id === profId);
+                    if (!prof) {
+                        mostrarToast('Professor não encontrado.', 'error');
+                        operacaoFalhou = true;
+                        break;
+                    }
+                    if (!professorDisponivelNoHorario(prof, turno, dia, tempoId)) {
+                        const continuarDisp = confirm('Professor não está disponível neste dia/turno/tempo. Deseja continuar mesmo assim?');
+                        if (!continuarDisp) {
+                            operacaoFalhou = true;
+                            break;
+                        }
+                    }
+                    const existenteProf = aulas.find(a =>
+                        a.id !== base.id &&
+                        a.professorId === profId &&
+                        a.turno === turno &&
+                        a.dia === dia &&
+                        a.tempoId === tempoId &&
+                        a.turmaId !== turmaId
+                    );
+                    if (existenteProf) {
+                        const continuar = confirm('Professor já tem aula neste mesmo horário em outra turma. Deseja continuar mesmo assim?');
+                        if (!continuar) {
+                            operacaoFalhou = true;
+                            break;
+                        }
+                    }
+                }
+                const grupoDisc = grupoDisciplinaPortMat(base.disciplina);
+                if (grupoDisc && !avisouPortMat) {
+                    const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
+                        a.turmaId === turmaId &&
+                        a.dia === dia &&
+                        grupoDisciplinaPortMat(a.disciplina) === grupoDisc &&
+                        !(a.turno === turno && a.dia === dia && a.turmaId === turmaId && a.tempoId === tempoId)
+                    );
+                    const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + 1;
+                    const limite = 2;
+                    if (totalFinalDiscDia > limite) {
+                        mostrarToast('Boas práticas pedagógicas sugerem não concentrar mais de 2 tempos de Português ou Matemática no mesmo dia para a mesma turma.', 'warning');
+                        avisouPortMat = true;
+                    }
+                }
+                const existente = obterAula(turno, dia, turmaId, tempoId);
+                if (existente) {
+                    aulas = aulas.filter(a => a.id !== existente.id);
+                }
+                if (clipboardModo === 'cut') {
+                    aulasUsadasCut.push(base);
+                }
+                const nova = {
+                    id: gerarId(),
+                    turno,
+                    dia,
+                    turmaId,
+                    tempoId,
+                    disciplina: base.disciplina,
+                    professorId: base.professorId || null
+                };
+                aulas.push(nova);
+            }
+        } catch (e) {
+            operacaoFalhou = true;
+        }
+        if (operacaoFalhou) {
+            aulas = JSON.parse(backupAulas);
+            clipboardModo = backupClipboardModo;
+            clipboardAulas = JSON.parse(backupClipboardAulas);
+            salvarLocal();
+            montarGradeTurno(turnoAtualGrade);
+            mostrarToast('Não foi possível colar as aulas recortadas neste(s) horário(s). As aulas foram devolvidas à célula de origem.', 'warning');
+            return;
+        }
+        if (clipboardModo === 'cut') {
+            const idsOrigem = new Set(aulasUsadasCut.map(a => a.id));
+            aulas = aulas.filter(a => !idsOrigem.has(a.id));
+            clipboardAulas = [];
+            clipboardModo = null;
+        }
+        salvarLocal();
+        montarGradeTurno(turnoAtualGrade);
+    });
+    menuContextoGrade.style.left = ev.clientX + 'px';
+    menuContextoGrade.style.top = ev.clientY + 'px';
+    menuContextoGrade.style.display = 'block';
+    if (menuContextoTimeout) {
+        clearTimeout(menuContextoTimeout);
+    }
+    menuContextoTimeout = setTimeout(() => {
+        if (menuContextoGrade) {
+            menuContextoGrade.style.display = 'none';
+        }
+        menuContextoTimeout = null;
+    }, 5000);
+}
 
 // =======================
 // UTILITÁRIOS
@@ -129,6 +385,24 @@ function atualizarIndicadorDesfazerTurno() {
     btn.textContent = qtd > 0 ? `${base} (${qtd})` : base;
 }
 
+function atualizarIndicadorRefazerTurno() {
+    const btn = document.getElementById('btnRefazerTurno');
+    if (!btn) return;
+    const turno = turnoAtualGrade;
+    let qtd = 0;
+    pilhaRedo.forEach(item => {
+        try {
+            const entry = JSON.parse(item);
+            if (entry && entry.turno === turno) {
+                qtd++;
+            }
+        } catch (e) {
+        }
+    });
+    const base = '↪️ Refazer';
+    btn.textContent = qtd > 0 ? `${base} (${qtd})` : base;
+}
+
 function capturarEstadoAulas() {
     const turno = turnoAtualGrade;
     const aulasTurno = aulas.filter(a => a.turno === turno);
@@ -137,6 +411,8 @@ function capturarEstadoAulas() {
         pilhaUndo.shift();
     }
     atualizarIndicadorDesfazerTurno();
+    pilhaRedo = [];
+    atualizarIndicadorRefazerTurno();
 }
 
 function gerarId() {
@@ -288,6 +564,138 @@ function apelidarDisciplina(nome) {
     return nome;
 }
 
+function normalizarPalavrasDisciplina(nome) {
+    const original = (nome || '').trim();
+    if (!original) return [];
+    const partes = original.split(/\s+/).map(p => p.replace(/[.,;:]/g, ''));
+    const stop = ['DE', 'DA', 'DO', 'DAS', 'DOS', 'E', 'EM', 'COM', 'PARA'];
+    const filtradas = partes.filter(p => p && !stop.includes(p.toUpperCase()));
+    return filtradas.length ? filtradas : partes.filter(Boolean);
+}
+
+function capitalizarParteDisciplina(str) {
+    if (!str) return '';
+    const lower = str.toLowerCase();
+    return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+function sugerirApelidoDisciplina(nome) {
+    const original = (nome || '').trim();
+    if (!original) return '';
+    const palavras = normalizarPalavrasDisciplina(original);
+    const totalChars = original.length;
+    if (palavras.length === 1) {
+        return original;
+    }
+    if (palavras.length <= 2 && totalChars <= 25) {
+        const p1 = capitalizarParteDisciplina(palavras[0].slice(0, 4));
+        const p2 = palavras[1] ? capitalizarParteDisciplina(palavras[1].slice(0, 2)) : '';
+        return (p1 + (p2 ? ' ' + p2 : '')).trim();
+    }
+    const iniciais = palavras.map(p => p.charAt(0).toUpperCase()).join(' ');
+    return iniciais;
+}
+
+function grupoDisciplinaPortMat(nome) {
+    const n = (nome || '').toUpperCase().trim();
+    if (!n) return null;
+    if (
+        n.includes('PORTUG') ||
+        n === 'PORT AP' ||
+        n === 'PORT APLICADO' ||
+        n === 'PORT APLICADA'
+    ) {
+        return 'PORTUG';
+    }
+    if (
+        n.includes('MATEM') ||
+        n === 'MAT AP' ||
+        n === 'MAT APLICADO' ||
+        n === 'MAT APLICADA'
+    ) {
+        return 'MATEM';
+    }
+    return null;
+}
+
+function calcularQualidadeAjusteTurno(turno) {
+    const aulasTurno = aulas.filter(a => a.turno === turno);
+    if (!aulasTurno.length) {
+        return { percentual: 100, totalAvaliado: 0, totalOk: 0 };
+    }
+
+    let totalAvaliado = 0;
+    let totalOk = 0;
+
+    const mapaFamilias = {};
+    aulasTurno.forEach(a => {
+        const tipo = grupoDisciplinaPortMat(a.disciplina);
+        if (!tipo) return;
+        const chave = `${a.turmaId || ''}|${a.professorId || ''}|${tipo}`;
+        if (!mapaFamilias[chave]) {
+            mapaFamilias[chave] = [];
+        }
+        mapaFamilias[chave].push(a);
+    });
+    const familias = Object.values(mapaFamilias);
+    familias.forEach(lista => {
+        if (!lista || lista.length !== 4) return;
+        totalAvaliado++;
+        const porDia = {};
+        lista.forEach(a => {
+            if (!porDia[a.dia]) porDia[a.dia] = [];
+            porDia[a.dia].push(a.tempoId);
+        });
+        const dias = Object.keys(porDia);
+        if (dias.length !== 2) return;
+        let ok = true;
+        for (const d of dias) {
+            const tempos = porDia[d].slice().sort((x, y) => x - y);
+            if (tempos.length !== 2) {
+                ok = false;
+                break;
+            }
+            if (Math.abs(tempos[0] - tempos[1]) !== 1) {
+                ok = false;
+                break;
+            }
+        }
+        if (ok) {
+            totalOk++;
+        }
+    });
+
+    const mapaPares = {};
+    aulasTurno.forEach(a => {
+        const turmaId = a.turmaId || '';
+        const profId = a.professorId || '';
+        const disc = (a.disciplina || '').toUpperCase();
+        if (!turmaId || !disc) return;
+        const chave = `${turmaId}|${profId}|${disc}`;
+        if (!mapaPares[chave]) {
+            mapaPares[chave] = [];
+        }
+        mapaPares[chave].push(a);
+    });
+    Object.values(mapaPares).forEach(lista => {
+        if (!lista || lista.length !== 2) return;
+        totalAvaliado++;
+        const a1 = lista[0];
+        const a2 = lista[1];
+        if (a1.dia !== a2.dia) return;
+        const diff = Math.abs(a1.tempoId - a2.tempoId);
+        if (diff === 1) {
+            totalOk++;
+        }
+    });
+
+    if (!totalAvaliado) {
+        return { percentual: 100, totalAvaliado: 0, totalOk: 0 };
+    }
+    const percentual = Math.round((totalOk / totalAvaliado) * 100);
+    return { percentual, totalAvaliado, totalOk };
+}
+
 function preencherSelectDisciplinasApelido() {
     const sel = document.getElementById('disciplinaApelidoSelect');
     if (!sel) return;
@@ -307,10 +715,14 @@ function preencherSelectDisciplinasApelido() {
     const chkRemover = document.getElementById('removerApelidoDisciplinaCheckbox');
     if (inputApelido) {
         inputApelido.disabled = false;
-        inputApelido.value = '';
-        if (sel.value && apelidosDisciplinas[sel.value]) {
-            inputApelido.value = apelidosDisciplinas[sel.value];
+        const discSel = sel.value;
+        let valor = '';
+        if (discSel && apelidosDisciplinas[discSel]) {
+            valor = apelidosDisciplinas[discSel];
+        } else if (discSel) {
+            valor = sugerirApelidoDisciplina(discSel);
         }
+        inputApelido.value = valor;
     }
     if (chkRemover) {
         chkRemover.checked = false;
@@ -354,23 +766,33 @@ function toggleRemoverApelidoDisciplina(chk) {
 }
 
 function mostrarToast(mensagem, tipo = 'success') {
-    // Remove toast anterior
     const toastAntigo = document.querySelector('.toast');
-    if (toastAntigo) toastAntigo.remove();
-    
-    // Cria novo toast
+    if (toastAntigo && toastAntigo.parentNode) {
+        toastAntigo.parentNode.removeChild(toastAntigo);
+    }
     const toast = document.createElement('div');
     toast.className = `toast ${tipo}`;
-    toast.textContent = mensagem;
+    const spanMsg = document.createElement('span');
+    spanMsg.textContent = mensagem;
+    toast.appendChild(spanMsg);
+    const btnFechar = document.createElement('button');
+    btnFechar.type = 'button';
+    btnFechar.className = 'toast-close';
+    btnFechar.textContent = '×';
+    btnFechar.onclick = () => {
+        if (toast.parentNode) {
+            toast.style.animation = 'slideIn 0.3s ease reverse';
+            setTimeout(() => toast.remove(), 300);
+        }
+    };
+    toast.appendChild(btnFechar);
     document.body.appendChild(toast);
-    
-    // Remove automaticamente após 3 segundos
     setTimeout(() => {
         if (toast.parentNode) {
             toast.style.animation = 'slideIn 0.3s ease reverse';
             setTimeout(() => toast.remove(), 300);
         }
-    }, 3000);
+    }, 10000);
 }
 
 // banner removido
@@ -383,6 +805,7 @@ function salvarLocal() {
         localStorage.setItem(`${APP_PREFIX}cursos`, JSON.stringify(cursos));
         localStorage.setItem(`${APP_PREFIX}tempos_por_turno`, JSON.stringify(TEMPOS_POR_TURNO));
         localStorage.setItem(`${APP_PREFIX}apelidos_disciplinas`, JSON.stringify(apelidosDisciplinas));
+        localStorage.setItem(`${APP_PREFIX}ordem_turmas_turno`, JSON.stringify(ORDEM_TURMAS_POR_TURNO));
         dadosModificados = true;
         mostrarToast('Dados salvos com sucesso!');
     } catch (e) {
@@ -399,15 +822,22 @@ function carregarLocal() {
         const c = localStorage.getItem(`${APP_PREFIX}cursos`);
         const tempos = localStorage.getItem(`${APP_PREFIX}tempos_por_turno`);
         const ap = localStorage.getItem(`${APP_PREFIX}apelidos_disciplinas`);
+        const ordemTurmas = localStorage.getItem(`${APP_PREFIX}ordem_turmas_turno`);
         if (p) professores = JSON.parse(p);
         if (t) turmas = JSON.parse(t);
         if (a) aulas = JSON.parse(a);
         if (c) cursos = JSON.parse(c);
+        if (!cursos.includes(CURSO_TEMPO_INTEGRAL)) {
+            cursos.push(CURSO_TEMPO_INTEGRAL);
+        }
         if (tempos) {
             try { TEMPOS_POR_TURNO = JSON.parse(tempos); } catch {}
         }
         if (ap) {
             try { apelidosDisciplinas = JSON.parse(ap) || {}; } catch { apelidosDisciplinas = {}; }
+        }
+        if (ordemTurmas) {
+            try { ORDEM_TURMAS_POR_TURNO = JSON.parse(ordemTurmas) || {}; } catch { ORDEM_TURMAS_POR_TURNO = {}; }
         }
     } catch (e) {
         console.warn('Não foi possível carregar do localStorage', e);
@@ -470,15 +900,627 @@ function migrarEstruturaLocal() {
     if (alterou) salvarLocal();
 }
 
+function prioridadeProfessorAlocacao(professorId) {
+    if (!professorId) return 500;
+    
+    const prof = professores.find(p => p.id === professorId);
+    if (!prof) return 500;
+    
+    let prioridade = 0;
+    
+    // 1. Prioridade por tipo de professor (Base Comum > Técnico)
+    const baseTipo = prof.baseTipo || 'TECNICA';
+    if (baseTipo === 'COMUM') prioridade -= 100;
+    
+    // 2. Priorizar professores com menos aulas alocadas
+    const aulasAtuais = aulas.filter(a => a.professorId === professorId).length;
+    prioridade -= aulasAtuais * 10;
+    
+    // 3. Considerar disponibilidade do professor
+    const turnoAtual = turnoAtualGrade;
+    const diasDisponiveis = DIAS_SEMANA.filter(dia => 
+        professorDisponivelNoDia(professorId, turnoAtual, dia)
+    );
+    prioridade -= diasDisponiveis.length * 5;
+    
+    // 4. Priorizar professores com carga horária mais equilibrada
+    const cargaPorDia = calcularCargaHorariaPorDia(professorId, turnoAtual);
+    const desvioPadrao = calcularDesvioPadraoCarga(cargaPorDia);
+    prioridade -= Math.round(desvioPadrao * 3);
+    
+    return prioridade;
+}
+
+// Função auxiliar para calcular carga horária por dia
+function calcularCargaHorariaPorDia(professorId, turno) {
+    const cargaPorDia = {};
+    DIAS_SEMANA.forEach(dia => {
+        cargaPorDia[dia] = aulas.filter(a => 
+            a.professorId === professorId && 
+            a.turno === turno && 
+            a.dia === dia
+        ).length;
+    });
+    return cargaPorDia;
+}
+
+// Função auxiliar para calcular desvio padrão
+function calcularDesvioPadraoCarga(cargaPorDia) {
+    const valores = Object.values(cargaPorDia);
+    if (valores.length === 0) return 0;
+    
+    const media = valores.reduce((sum, val) => sum + val, 0) / valores.length;
+    const variancia = valores.reduce((sum, val) => sum + Math.pow(val - media, 2), 0) / valores.length;
+    return Math.sqrt(variancia);
+}
+
+// Função auxiliar para verificar disponibilidade por dia
+function professorDisponivelNoDia(professorId, turno, dia) {
+    const prof = professores.find(p => p.id === professorId);
+    if (!prof || !prof.disponibilidade) return true;
+    
+    const dispTurno = prof.disponibilidade[turno];
+    if (!dispTurno) return false;
+    
+    return dispTurno[dia] !== false;
+}
+
+// ===========================================
+// MELHORIA 5: OTIMIZAÇÃO DE ALOCAÇÃO DE 2-TEMPOS
+// ===========================================
+
+// Função para otimizar a alocação de disciplinas com 2 tempos
+function otimizarAlocacaoDoisTempos(turno) {
+    const turmasTurno = turmas.filter(t => t.turno === turno);
+    
+    turmasTurno.forEach(turma => {
+        // Identificar disciplinas com exatamente 2 tempos
+        const aulasTurma = aulas.filter(a => 
+            a.turno === turno && 
+            a.turmaId === turma.id &&
+            a.disciplina
+        );
+        
+        const contagemDisciplinas = {};
+        aulasTurma.forEach(a => {
+            const disc = (a.disciplina || '').toUpperCase();
+            contagemDisciplinas[disc] = (contagemDisciplinas[disc] || 0) + 1;
+        });
+        
+        // Focar nas disciplinas com exatamente 2 tempos
+        const disciplinasDoisTempos = Object.keys(contagemDisciplinas).filter(
+            disc => contagemDisciplinas[disc] === 2
+        );
+        
+        disciplinasDoisTempos.forEach(discNome => {
+            const aulasDisc = aulasTurma.filter(a => 
+                (a.disciplina || '').toUpperCase() === discNome
+            );
+            
+            if (aulasDisc.length === 2) {
+                const professorId = aulasDisc[0].professorId;
+                if (professorId) {
+                    melhorarDistribuicaoDoisTempos(aulasDisc, turno, turma.id, professorId);
+                }
+            }
+        });
+    });
+}
+
+// Função para melhorar a distribuição de 2 tempos
+function melhorarDistribuicaoDoisTempos(aulasDisc, turno, turmaId, professorId) {
+    const diasAtuais = Array.from(new Set(aulasDisc.map(a => a.dia)));
+    
+    // Se já estão no mesmo dia, verificar se estão consecutivos
+    if (diasAtuais.length === 1) {
+        const dia = diasAtuais[0];
+        const tempos = aulasDisc.map(a => a.tempoId).sort((a, b) => a - b);
+        
+        // Se não estão consecutivos, tentar juntá-los
+        if (tempos[1] !== tempos[0] + 1) {
+            tentarJuntarTemposConsecutivos(aulasDisc, turno, dia, turmaId, professorId);
+        }
+    } else {
+        // Se estão em dias diferentes, avaliar qual é melhor
+        const melhorDia = encontrarMelhorDiaParaDoisTempos(turno, turmaId, professorId);
+        if (melhorDia && melhorDia !== diasAtuais[0] && melhorDia !== diasAtuais[1]) {
+            tentarMoverParaMelhorDia(aulasDisc, turno, turmaId, professorId, melhorDia);
+        }
+    }
+}
+
+// Encontrar o melhor dia para alocar 2 tempos consecutivos
+function encontrarMelhorDiaParaDoisTempos(turno, turmaId, professorId) {
+    const dias = DIAS_SEMANA;
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    
+    let melhorDia = null;
+    let melhorPontuacao = -1;
+    
+    dias.forEach(dia => {
+        // Verificar disponibilidade do professor
+        if (!professorDisponivelNoDia(professorId, turno, dia)) return;
+        
+        // Verificar se há tempos consecutivos disponíveis
+        const temposOcupados = new Set(
+            aulas.filter(a => 
+                a.turno === turno && 
+                a.dia === dia && 
+                a.turmaId === turmaId
+            ).map(a => a.tempoId)
+        );
+        
+        let pontuacao = 0;
+        
+        // Procurar por pares consecutivos disponíveis
+        for (let i = 0; i < temposTurno.length - 1; i++) {
+            const t1 = temposTurno[i].id;
+            const t2 = temposTurno[i + 1].id;
+            
+            if (!temposOcupados.has(t1) && !temposOcupados.has(t2)) {
+                // Verificar disponibilidade do professor nos dois tempos
+                if (professorDisponivelNoHorario(
+                    professores.find(p => p.id === professorId), 
+                    turno, dia, t1
+                ) && professorDisponivelNoHorario(
+                    professores.find(p => p.id === professorId), 
+                    turno, dia, t2
+                )) {
+                    pontuacao += 10; // Par perfeito encontrado
+                    
+                    // Bonus se for no início ou meio do dia (evitar fim do dia)
+                    if (i < 2) pontuacao += 3; // Início do dia
+                    else if (i < temposTurno.length - 3) pontuacao += 2; // Meio do dia
+                    
+                    if (pontuacao > melhorPontuacao) {
+                        melhorPontuacao = pontuacao;
+                        melhorDia = dia;
+                    }
+                }
+            }
+        }
+    });
+    
+    return melhorDia;
+}
+
+// Tentar juntar tempos em consecutivos no mesmo dia
+function tentarJuntarTemposConsecutivos(aulasDisc, turno, dia, turmaId, professorId) {
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    const temposOcupados = new Set(
+        aulas.filter(a => 
+            a.turno === turno && 
+            a.dia === dia && 
+            a.turmaId === turmaId &&
+            !aulasDisc.includes(a)
+        ).map(a => a.tempoId)
+    );
+    
+    // Procurar por pares consecutivos disponíveis
+    for (let i = 0; i < temposTurno.length - 1; i++) {
+        const t1 = temposTurno[i].id;
+        const t2 = temposTurno[i + 1].id;
+        
+        if (!temposOcupados.has(t1) && !temposOcupados.has(t2)) {
+            // Verificar disponibilidade do professor
+            const prof = professores.find(p => p.id === professorId);
+            if (prof && 
+                professorDisponivelNoHorario(prof, turno, dia, t1) &&
+                professorDisponivelNoHorario(prof, turno, dia, t2) &&
+                !verificarConflitoProfessor(professorId, turno, dia, t1) &&
+                !verificarConflitoProfessor(professorId, turno, dia, t2)
+            ) {
+                // Aplicar a mudança
+                aulasDisc[0].dia = dia;
+                aulasDisc[0].tempoId = t1;
+                aulasDisc[1].dia = dia;
+                aulasDisc[1].tempoId = t2;
+                
+                salvarLocal();
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+// Tentar mover para o melhor dia identificado
+function tentarMoverParaMelhorDia(aulasDisc, turno, turmaId, professorId, melhorDia) {
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    const temposOcupados = new Set(
+        aulas.filter(a => 
+            a.turno === turno && 
+            a.dia === melhorDia && 
+            a.turmaId === turmaId
+        ).map(a => a.tempoId)
+    );
+    
+    // Procurar por pares consecutivos disponíveis no melhor dia
+    for (let i = 0; i < temposTurno.length - 1; i++) {
+        const t1 = temposTurno[i].id;
+        const t2 = temposTurno[i + 1].id;
+        
+        if (!temposOcupados.has(t1) && !temposOcupados.has(t2)) {
+            const prof = professores.find(p => p.id === professorId);
+            if (prof && 
+                professorDisponivelNoHorario(prof, turno, melhorDia, t1) &&
+                professorDisponivelNoHorario(prof, turno, melhorDia, t2) &&
+                !verificarConflitoProfessor(professorId, turno, melhorDia, t1) &&
+                !verificarConflitoProfessor(professorId, turno, melhorDia, t2)
+            ) {
+                // Aplicar a mudança
+                aulasDisc[0].dia = melhorDia;
+                aulasDisc[0].tempoId = t1;
+                aulasDisc[1].dia = melhorDia;
+                aulasDisc[1].tempoId = t2;
+                
+                salvarLocal();
+                return true;
+            }
+        }
+    }
+    
+    return false;
+}
+
+// Integrar a otimização no ajuste inteligente principal
+function ajusteInteligenteCompleto() {
+    const turno = turnoAtualGrade;
+    
+    if (!confirm('O ajuste inteligente completo vai otimizar horários, priorizar alocações e melhorar distribuição de 2-tempos. Continuar?')) {
+        return;
+    }
+    
+    capturarEstadoAulas();
+    
+    // Executar o ajuste inteligente original
+    ajusteInteligente();
+    
+    // Aplicar otimização específica para 2-tempos
+    otimizarAlocacaoDoisTempos(turno);
+    
+    montarGradeTurno(turnoAtualGrade);
+    mostrarToast('Ajuste inteligente completo aplicado com otimizações!');
+}
+
 // Verificar conflitos
 function verificarConflitoProfessor(professorId, turno, dia, tempoId, aulaId = null) {
     return aulas.some(a => 
-        a.id !== aulaId && // Ignora a própria aula se estiver editando
+        a.id !== aulaId &&
         a.professorId === professorId &&
         a.turno === turno &&
         a.dia === dia &&
         a.tempoId === tempoId
     );
+}
+
+function confirmarDisponibilidadeProfessorDetalhada(prof, turno, dia, tempoId) {
+    if (professorDisponivelNoHorario(prof, turno, dia, tempoId)) {
+        return true;
+    }
+    const profId = prof.id;
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    const diasForaDisp = new Set();
+    aulas.forEach(a => {
+        if (a.professorId === profId && a.turno === turno) {
+            if (!professorDisponivelNoHorario(prof, a.turno, a.dia, a.tempoId)) {
+                diasForaDisp.add(a.dia);
+            }
+        }
+    });
+    const diasComDisp = DIAS_SEMANA.filter(diaSigla =>
+        temposTurno.some(t => professorDisponivelNoHorario(prof, turno, diaSigla, t.id))
+    );
+    let msg = 'Este professor não está disponível neste dia/turno/tempo.\n\n';
+    if (diasComDisp.length && temposTurno.length) {
+        const pad = function(text, width) {
+            text = String(text);
+            if (text.length >= width) return text;
+            return text + ' '.repeat(width - text.length);
+        };
+        msg += 'Disponibilidades deste professor no turno ' + turno + ':\n';
+        const colTempoWidth = 6;
+        const colDiaWidth = 12;
+        const headerTempo = pad('Tp', colTempoWidth);
+        const headerDias = diasComDisp.map(d => {
+            let nome = textoDia(d).slice(0, 3);
+            if (diasForaDisp.has(d)) {
+                nome = '*' + nome + '*';
+            }
+            return pad(nome, colDiaWidth);
+        });
+        msg += headerTempo + ' | ' + headerDias.join(' | ') + '\n';
+        msg += ''.padEnd(headerTempo.length + 3 + headerDias.length * (colDiaWidth + 3) - 3, '-') + '\n';
+        temposTurno.forEach((t, idxTempo) => {
+            const rotuloTempo = pad((idxTempo + 1) + 'º', colTempoWidth);
+            const cols = diasComDisp.map(diaSigla =>
+                professorDisponivelNoHorario(prof, turno, diaSigla, t.id)
+                    ? pad(t.inicio + '-' + t.fim, colDiaWidth)
+                    : pad('', colDiaWidth)
+            );
+            msg += rotuloTempo + ' | ' + cols.join(' | ') + '\n';
+        });
+    } else {
+        msg += 'Não há qualquer tempo disponível para este professor neste turno.\n';
+    }
+    msg += '\nDeseja continuar mesmo assim?';
+    return confirm(msg);
+}
+
+function confirmarConflitoProfessorDetalhado(profId, turno, dia, tempoId, turmaId, aulaIdIgnorar = null) {
+    if (!verificarConflitoProfessor(profId, turno, dia, tempoId, aulaIdIgnorar)) {
+        return true;
+    }
+    const conflitos = aulas.filter(a =>
+        a.professorId === profId &&
+        a.turno === turno &&
+        a.dia === dia &&
+        a.tempoId === tempoId &&
+        a.id !== aulaIdIgnorar
+    );
+    const conflitosReais = conflitos.filter(a => a.turmaId !== turmaId);
+    if (!conflitosReais.length) {
+        return true;
+    }
+    let msg = 'Este professor já tem aula neste mesmo horário:\n\n';
+    conflitosReais.forEach(a => {
+        const turmaConf = turmas.find(t => t.id === a.turmaId);
+        const nomeTurma = turmaConf ? turmaConf.nome : (a.turmaId || '');
+        const nomeDisc = a.disciplina || '';
+        msg += '- ' + nomeTurma + (nomeDisc ? ' — ' + nomeDisc : '') + '\n';
+    });
+    msg += '\nDeseja continuar mesmo assim?';
+    return confirm(msg);
+}
+
+function verificarConflitosTurno() {
+    const turno = turnoAtualGrade;
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    if (!temposTurno.length) {
+        mostrarToast('Não há tempos configurados para este turno.', 'warning');
+        return;
+    }
+    const aulasTurno = aulas.filter(a => a.turno === turno);
+    if (!aulasTurno.length) {
+        mostrarToast('Não há aulas lançadas neste turno para verificar conflitos.', 'warning');
+        return;
+    }
+
+    const conflitos = [];
+    const mapaProfDiaTempo = {};
+
+    aulasTurno.forEach(aula => {
+        const dia = aula.dia;
+        const tempoId = aula.tempoId;
+        const turmaId = aula.turmaId;
+        const profId = aula.professorId || null;
+
+        const tempoValido = temposTurno.some(t => t.id === tempoId);
+        if (!tempoValido) {
+            conflitos.push({
+                tipo: 'TEMPO_INVALIDO',
+                aula
+            });
+        }
+
+        if (profId) {
+            const prof = professores.find(p => p.id === profId);
+            if (prof && !professorDisponivelNoHorario(prof, turno, dia, tempoId)) {
+                conflitos.push({
+                    tipo: 'INDISPONIBILIDADE_PROFESSOR',
+                    aula
+                });
+            }
+
+            const chaveProf = `${profId}|${dia}|${tempoId}`;
+            if (!mapaProfDiaTempo[chaveProf]) {
+                mapaProfDiaTempo[chaveProf] = [];
+            }
+            mapaProfDiaTempo[chaveProf].push(aula);
+        }
+    });
+
+    Object.keys(mapaProfDiaTempo).forEach(chave => {
+        const lista = mapaProfDiaTempo[chave];
+        if (lista.length > 1) {
+            conflitos.push({
+                tipo: 'CONFLITO_PROFESSOR',
+                aulas: lista
+            });
+        }
+    });
+
+    if (!conflitos.length) {
+        mostrarToast('Nenhum conflito encontrado neste turno.', 'success');
+        return;
+    }
+
+    const descricoes = [];
+    let conflitosProfessor = 0;
+    let conflitosDisponibilidade = 0;
+    let conflitosTempo = 0;
+
+    conflitos.forEach(c => {
+        if (c.tipo === 'CONFLITO_PROFESSOR') {
+            conflitosProfessor++;
+            const aulasLista = c.aulas || [];
+            aulasLista.forEach(a => {
+                const prof = a.professorId ? professores.find(p => p.id === a.professorId) : null;
+                const turma = turmas.find(t => t.id === a.turmaId);
+                const tempo = getTempos(a.turno).find(t => t.id === a.tempoId);
+                descricoes.push(`Professor em conflito: ${prof ? prof.nome : 'sem nome'} - ${a.disciplina || ''} - ${turma ? turma.nome : ''} - ${a.dia} ${textoTurno(a.turno)} ${tempo ? tempo.etiqueta : 'Tempo ' + a.tempoId}`);
+            });
+        } else if (c.tipo === 'INDISPONIBILIDADE_PROFESSOR') {
+            conflitosDisponibilidade++;
+            const a = c.aula;
+            const prof = a.professorId ? professores.find(p => p.id === a.professorId) : null;
+            const turma = turmas.find(t => t.id === a.turmaId);
+            const tempo = getTempos(a.turno).find(t => t.id === a.tempoId);
+            descricoes.push(`Professor indisponível: ${prof ? prof.nome : 'sem nome'} - ${a.disciplina || ''} - ${turma ? turma.nome : ''} - ${a.dia} ${textoTurno(a.turno)} ${tempo ? tempo.etiqueta : 'Tempo ' + a.tempoId}`);
+        } else if (c.tipo === 'TEMPO_INVALIDO') {
+            conflitosTempo++;
+            const a = c.aula;
+            const turma = turmas.find(t => t.id === a.turmaId);
+            descricoes.push(`Tempo inválido na configuração: ${a.disciplina || ''} - ${turma ? turma.nome : ''} - ${a.dia} ${textoTurno(a.turno)} Tempo ${a.tempoId}`);
+        }
+    });
+
+    const resumo = [];
+    if (conflitosProfessor) resumo.push(`${conflitosProfessor} conflito(s) de professor em duas turmas no mesmo horário`);
+    if (conflitosDisponibilidade) resumo.push(`${conflitosDisponibilidade} aula(s) em horário de indisponibilidade do professor`);
+    if (conflitosTempo) resumo.push(`${conflitosTempo} aula(s) usando tempo inexistente neste turno`);
+
+    const msgResumo = resumo.join(' | ');
+    const msgDetalhada = descricoes.slice(0, 10).join('\n');
+    let msg = `Conflitos encontrados neste turno:\n${msgResumo}`;
+    if (msgDetalhada) {
+        msg += `\n\nDetalhes (até 10 registros):\n${msgDetalhada}`;
+    }
+    alert(msg);
+}
+
+// Nova função para detecção proativa de conflitos com informações detalhadas
+function verificarConflitosPotenciais(professorId, turno, dia, tempoId, aulaId = null) {
+    const conflitos = [];
+    
+    // 1. Verificar conflitos com outras aulas do mesmo professor
+    const conflitosProfessor = aulas.filter(a => 
+        a.id !== aulaId &&
+        a.professorId === professorId &&
+        a.turno === turno &&
+        a.dia === dia &&
+        a.tempoId === tempoId
+    );
+    
+    if (conflitosProfessor.length > 0) {
+        conflitosProfessor.forEach(aulaConflito => {
+            const turma = turmas.find(t => t.id === aulaConflito.turmaId);
+            const nomeTurma = turma ? turma.nome : 'Turma desconhecida';
+            conflitos.push({
+                tipo: 'PROFESSOR',
+                mensagem: `Conflito com aula em ${nomeTurma} - ${aulaConflito.disciplina || 'Sem disciplina'}`,
+                aula: aulaConflito
+            });
+        });
+    }
+    
+    // 2. Verificar disponibilidade do professor
+    const prof = professores.find(p => p.id === professorId);
+    if (prof) {
+        if (!professorDisponivelNoHorario(prof, turno, dia, tempoId)) {
+            conflitos.push({
+                tipo: 'DISPONIBILIDADE',
+                mensagem: 'Professor não disponível neste horário',
+                detalhes: `Verifique a disponibilidade de ${prof.nome} nas configurações`
+            });
+        }
+    }
+    
+    // 3. Verificar limite de tempos por dia para o professor
+    const aulasProfDia = aulas.filter(a => 
+        a.professorId === professorId &&
+        a.turno === turno &&
+        a.dia === dia &&
+        a.id !== aulaId
+    );
+    
+    if (aulasProfDia.length >= 4) {
+        conflitos.push({
+            tipo: 'LIMITE_TEMPOS',
+            mensagem: 'Limite de 4 tempos por dia atingido para este professor',
+            detalhes: `Professor já tem ${aulasProfDia.length} aulas neste dia`
+        });
+    }
+    
+    // 4. Verificar se a turma já tem aula neste horário
+    if (aulaId) {
+        const aulaAtual = aulas.find(a => a.id === aulaId);
+        if (aulaAtual) {
+            const conflitoTurma = aulas.some(a => 
+                a.id !== aulaId &&
+                a.turmaId === aulaAtual.turmaId &&
+                a.turno === turno &&
+                a.dia === dia &&
+                a.tempoId === tempoId
+            );
+            
+            if (conflitoTurma) {
+                conflitos.push({
+                    tipo: 'TURMA',
+                    mensagem: 'Turma já possui aula neste horário',
+                    detalhes: 'Cada turma só pode ter uma aula por tempo'
+                });
+            }
+        }
+    }
+    
+    return conflitos;
+}
+
+// Função para exibir conflitos de forma amigável
+function exibirConflitosDetalhados(conflitos) {
+    if (conflitos.length === 0) return null;
+    
+    let mensagem = 'Conflitos detectados:\n\n';
+    
+    conflitos.forEach((conflito, index) => {
+        mensagem += `${index + 1}. ${conflito.mensagem}\n`;
+        if (conflito.detalhes) {
+            mensagem += `   → ${conflito.detalhes}\n`;
+        }
+        mensagem += '\n';
+    });
+    
+    mensagem += 'Deseja continuar mesmo assim?';
+    return confirm(mensagem);
+}
+
+function verificarConflitosProfessoresGlobais() {
+    if (!aulas || !aulas.length) {
+        alert('Não há aulas lançadas para verificar.');
+        return;
+    }
+
+    const conflitosPorChave = new Map();
+
+    aulas.forEach(aula => {
+        if (!aula.professorId) return;
+        const chave = `${aula.professorId}||${aula.turno}||${aula.dia}||${aula.tempoId}`;
+        if (!conflitosPorChave.has(chave)) {
+            conflitosPorChave.set(chave, []);
+        }
+        conflitosPorChave.get(chave).push(aula);
+    });
+
+    const linhas = [];
+
+    conflitosPorChave.forEach((lista, chave) => {
+        if (lista.length <= 1) return;
+        const [profId, turno, dia, tempoId] = chave.split('||');
+        const prof = professores.find(p => p.id === profId);
+        const nomeProf = prof && prof.nome ? prof.nome : profId;
+        const tempo = getTempos(turno).find(t => t.id === Number(tempoId));
+        const etiquetaTempo = tempo ? tempo.etiqueta : `Tempo ${tempoId}`;
+        const turmasConflito = lista.map(a => {
+            const turma = turmas.find(t => t.id === a.turmaId);
+            return turma && turma.nome ? turma.nome : a.turmaId;
+        });
+        linhas.push(
+            `${nomeProf} — ${textoDia(dia)} / ${textoTurno(turno)} / ${etiquetaTempo}: ` +
+            turmasConflito.join(', ')
+        );
+    });
+
+    if (!linhas.length) {
+        alert('Nenhum conflito de professor encontrado entre turmas.');
+        return;
+    }
+
+    const mensagem =
+        'Foram encontrados conflitos de professor (mesmo horário em mais de uma turma):\n\n' +
+        linhas.join('\n');
+    alert(mensagem);
 }
 
 function professorDisponivelNoHorario(prof, turno, dia, tempoId) {
@@ -509,6 +1551,110 @@ function professorDisponivelNoHorario(prof, turno, dia, tempoId) {
         const okTurno = turnosF.length === 0 || turnosF.includes(turno);
         return okDia && okTurno && okTempo;
     }
+}
+
+function diagnosticoDisponibilidadeProfessorTurno(professorId, turno, quantidadeSolicitada) {
+    const prof = professores.find(p => p.id === professorId);
+    if (!prof) return null;
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+    if (!temposTurno.length) return null;
+    const dias = DIAS_SEMANA || [];
+    let capacidade = 0;
+    let ocupados = 0;
+    dias.forEach(dia => {
+        temposTurno.forEach(t => {
+            if (!professorDisponivelNoHorario(prof, turno, dia, t.id)) return;
+            capacidade++;
+            const ja = aulas.some(a =>
+                a.professorId === professorId &&
+                a.turno === turno &&
+                a.dia === dia &&
+                a.tempoId === t.id
+            );
+            if (ja) {
+                ocupados++;
+            }
+        });
+    });
+    const livres = capacidade - ocupados;
+    const faltam = quantidadeSolicitada > livres ? (quantidadeSolicitada - livres) : 0;
+    return { capacidade, ocupados, livres, faltam, professor: prof };
+}
+
+function gerarRelatorioFalhasInsercaoRapidaPlanilha(gruposFalha, ignoradas, gruposAplicados) {
+    if (!gruposFalha || !gruposFalha.length) return;
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+        return;
+    }
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const titulo = 'Relatório de falhas da inserção rápida via planilha';
+    doc.setFontSize(12);
+    doc.setFont(undefined, 'bold');
+    doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'normal');
+    const resumo = [
+        `Data: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`,
+        `Solicitações aplicadas: ${gruposAplicados}`,
+        `Linhas ignoradas na leitura do arquivo: ${ignoradas}`,
+        `Total de grupos com falha de alocação: ${gruposFalha.length}`
+    ];
+    let y = 25;
+    resumo.forEach(l => {
+        doc.text(l, 10, y);
+        y += 5;
+    });
+    const head = [['Turma', 'Turno', 'Disciplina', 'Professor', 'Qtd. não alocada', 'Situação / Sugestão']];
+    const body = [];
+    gruposFalha.forEach(g => {
+        const turma = turmas.find(t => t.id === g.turmaId);
+        const nomeTurma = turma && turma.nome ? turma.nome : String(g.turmaId);
+        const turnoTxt = textoTurno(g.turno);
+        const prof = g.professorId ? professores.find(p => p.id === g.professorId) : null;
+        const nomeProf = prof && prof.nome ? prof.nome : '-';
+        const qtdNaoAlocada = g.quantidade || 0;
+        let situacao = 'Não foi possível alocar as aulas solicitadas.';
+        if (g.professorId) {
+            const diag = diagnosticoDisponibilidadeProfessorTurno(g.professorId, g.turno, g.quantidade);
+            if (diag) {
+                if (diag.capacidade === 0) {
+                    situacao += ` O professor não possui qualquer disponibilidade registrada neste turno; seriam necessários pelo menos ${g.quantidade} tempo(s) livres neste turno.`;
+                } else if (diag.faltam > 0) {
+                    situacao += ` Disponibilidade insuficiente: com a configuração atual o professor tem ${diag.livres} tempo(s) livre(s) no turno; para este pedido seriam necessários pelo menos ${diag.faltam} tempo(s) livres adicionais.`;
+                } else {
+                    situacao += ' Verifique conflitos com outras turmas ou limites de tempos por dia.';
+                }
+            }
+        }
+        situacao += ` Quantidade de tempos deste pedido que não pôde ser alocada: ${qtdNaoAlocada}.`;
+        body.push([nomeTurma, turnoTxt, g.disciplinaUpper || g.disciplina || '-', nomeProf, String(qtdNaoAlocada), situacao]);
+    });
+    doc.autoTable({
+        head,
+        body,
+        startY: y + 2,
+        theme: 'grid',
+        styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            valign: 'top'
+        },
+        headStyles: {
+            fillColor: [230, 126, 34],
+            textColor: 255
+        },
+        columnStyles: {
+            0: { cellWidth: 22 },
+            1: { cellWidth: 18 },
+            2: { cellWidth: 30 },
+            3: { cellWidth: 30 },
+            4: { cellWidth: 16 },
+            5: { cellWidth: 72 }
+        }
+    });
+    const nomeArquivo = `falhas_insercao_planilha_${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(nomeArquivo);
 }
 
 // =======================
@@ -631,6 +1777,18 @@ function showSection(id) {
 function selecionarChip(groupId, hiddenId, btn) {
     const group = document.getElementById(groupId);
     if (!group) return;
+    if (groupId === 'chips-turno-turma') {
+        const selCurso = document.getElementById('cursoTurma');
+        const cursoVal = selCurso ? selCurso.value : '';
+        if (cursoVal === CURSO_TEMPO_INTEGRAL) {
+            btn.classList.toggle('selecionado');
+            const selecionados = Array.from(group.querySelectorAll('.chip.selecionado'))
+                .map(c => c.getAttribute('data-value'));
+            const hidden = document.getElementById(hiddenId);
+            if (hidden) hidden.value = selecionados.join(',');
+            return;
+        }
+    }
     group.querySelectorAll('.chip').forEach(c => c.classList.remove('selecionado'));
     btn.classList.add('selecionado');
 
@@ -791,6 +1949,12 @@ function importarExcelInsercaoRapida(event) {
                 ignoradas++;
                 continue;
             }
+            if (!Object.prototype.hasOwnProperty.call(apelidosDisciplinas, disciplina)) {
+                const sugestao = sugerirApelidoDisciplina(disciplina);
+                if (sugestao) {
+                    apelidosDisciplinas[disciplina] = sugestao;
+                }
+            }
             const turma = turmas.find(t =>
                 (t.nome || '').toUpperCase() === turmaNome.toUpperCase()
             );
@@ -831,23 +1995,43 @@ function importarExcelInsercaoRapida(event) {
         }
 
         let gruposAplicados = 0;
-        grupos.forEach(grupo => {
+        const gruposFalha = [];
+        const listaGrupos = Array.from(grupos.values());
+        listaGrupos.sort((a, b) => {
+            const pa = prioridadeProfessorAlocacao(a.professorId || null);
+            const pb = prioridadeProfessorAlocacao(b.professorId || null);
+            if (pa !== pb) return pa - pb;
+            return (b.quantidade || 0) - (a.quantidade || 0);
+        });
+        listaGrupos.forEach(grupo => {
             if (grupo.quantidade > 0) {
-                ajusteInteligenteInsercaoRapida(
+                const ok = ajusteInteligenteInsercaoRapida(
                     grupo.turno,
                     grupo.turmaId,
                     grupo.disciplina,
                     grupo.professorId,
                     grupo.quantidade
                 );
-                gruposAplicados++;
+                if (ok) {
+                    harmonizarFamiliasPortMatInsercaoRapida(grupo.turno, grupo.turmaId, grupo.professorId || null);
+                    gruposAplicados++;
+                } else {
+                    gruposFalha.push(grupo);
+                }
             }
         });
 
         if (gruposAplicados === 0) {
-            mostrarToast('Nenhum pedido da planilha pôde ser aplicado. Verifique os dados.', 'warning');
+            gerarRelatorioFalhasInsercaoRapidaPlanilha(gruposFalha, ignoradas, gruposAplicados);
+            const msg = 'Nenhum pedido da planilha pôde ser aplicado. Foi gerado um PDF com os problemas encontrados e sugestões de disponibilidade por professor.';
+            mostrarToast(msg, 'warning');
         } else {
-            mostrarToast(`Inserção rápida via planilha concluída. Solicitações aplicadas: ${gruposAplicados}. Linhas ignoradas: ${ignoradas}.`, 'success');
+            let msg = `Inserção rápida via planilha concluída. Solicitações aplicadas: ${gruposAplicados}. Linhas ignoradas: ${ignoradas}.`;
+            if (gruposFalha.length) {
+                gerarRelatorioFalhasInsercaoRapidaPlanilha(gruposFalha, ignoradas, gruposAplicados);
+                msg += ' Alguns pedidos não puderam ser alocados. Foi gerado um PDF com detalhes dos problemas e sugestões por professor.';
+            }
+            mostrarToast(msg, gruposFalha.length ? 'warning' : 'success');
         }
         event.target.value = '';
     };
@@ -860,9 +2044,15 @@ function obterDadosInsercaoRapida() {
     const profSel = document.getElementById('rapidoProfessor');
     const discInput = document.getElementById('rapidoDisciplina');
     const qtdInput = document.getElementById('rapidoQuantidade');
+    let turmaIds = [];
+    if (turmaSel) {
+        const opts = Array.from(turmaSel.options || []);
+        turmaIds = opts.filter(o => o.selected && o.value).map(o => o.value);
+    }
     return {
         turno: turnoSel ? turnoSel.value : '',
-        turmaId: turmaSel ? turmaSel.value : '',
+        turmaId: turmaIds.length === 1 ? turmaIds[0] : '',
+        turmaIds,
         professorId: profSel ? profSel.value : '',
         disciplina: discInput ? discInput.value.trim() : '',
         quantidade: qtdInput ? qtdInput.value : '1'
@@ -898,17 +2088,6 @@ function tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, 
             }
         });
         if (conflitos.length > 0) {
-            return false;
-        }
-        const maxPorTurmaDia = 4;
-        const aulasProfTurmaDia = aulas.filter(a =>
-            a.turno === turno &&
-            a.dia === dia &&
-            a.turmaId === turmaId &&
-            a.professorId === professorId
-        );
-        const totalFinalProfTurmaDia = aulasProfTurmaDia.length + tempoIds.length;
-        if (totalFinalProfTurmaDia > maxPorTurmaDia) {
             return false;
         }
     }
@@ -952,20 +2131,26 @@ function tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, 
             slotsProibidos.add(`${sugestao.dia}|${sugestao.tempoId}`);
         }
     }
-    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
-    const disciplinaSujeitaRegra =
-        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    const grupoDisc = grupoDisciplinaPortMat(disciplina);
+    const disciplinaSujeitaRegra = !!grupoDisc;
     if (disciplinaSujeitaRegra) {
         const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
             a.turmaId === turmaId &&
             a.dia === dia &&
-            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+            grupoDisciplinaPortMat(a.disciplina) === grupoDisc &&
             !tempoIds.includes(a.tempoId)
         );
         const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + tempoIds.length;
         const limite = 2;
         if (totalFinalDiscDia > limite) {
-            return false;
+            if (!professorId) {
+                return false;
+            }
+            const profs = new Set(aulasMesmoDiaMesmaDisciplina.map(a => a.professorId || null));
+            profs.add(professorId);
+            if (profs.size > 1) {
+                return false;
+            }
         }
     }
     capturarEstadoAulas();
@@ -1006,9 +2191,8 @@ function sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsPro
         prof = professores.find(p => p.id === profId);
         if (!prof) return null;
     }
-    const nomeDiscNorm = (aula.disciplina || '').toUpperCase();
-    const disciplinaSujeitaRegra =
-        nomeDiscNorm.includes('PORTUG') || nomeDiscNorm.includes('MATEM');
+    const grupoDisc = grupoDisciplinaPortMat(aula.disciplina);
+    const disciplinaSujeitaRegra = !!grupoDisc;
     for (let d = 0; d < dias.length; d++) {
         const dia = dias[d];
         for (let i = 0; i < temposTurno.length; i++) {
@@ -1044,7 +2228,7 @@ function sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsPro
                     a.turno === turno &&
                     a.dia === dia &&
                     a.turmaId === aula.turmaId &&
-                    (a.disciplina || '').toUpperCase() === nomeDiscNorm
+                    grupoDisciplinaPortMat(a.disciplina) === grupoDisc
                 );
                 const total = aulasDiaMesmaDisc.length + 1;
                 if (total > 2) continue;
@@ -1056,7 +2240,8 @@ function sugerirNovoSlotParaAulaRealloc(aula, turno, dias, temposTurno, slotsPro
 }
 
 function encontrarBlocoDoisTemposDiaPortMat(turno, dia, turmaId, disciplina, professorId, temposTurno, temposValidos, dias) {
-    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
+    const grupoDisc = grupoDisciplinaPortMat(disciplina);
+    if (!grupoDisc) return null;
     let prof = null;
     if (professorId) {
         prof = professores.find(p => p.id === professorId);
@@ -1065,7 +2250,7 @@ function encontrarBlocoDoisTemposDiaPortMat(turno, dia, turmaId, disciplina, pro
     const aulasDiaDisc = aulas.filter(a =>
         a.turmaId === turmaId &&
         a.dia === dia &&
-        (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm
+        grupoDisciplinaPortMat(a.disciplina) === grupoDisc
     );
     if (aulasDiaDisc.length > 1) {
         return null;
@@ -1418,6 +2603,7 @@ function salvarProfessor(e) {
     const id = document.getElementById('professorId').value;
     const nome = document.getElementById('nomeProfessor').value.trim();
     const disciplinasStr = document.getElementById('disciplinasProfessor').value;
+    const apelidoProfInput = document.getElementById('apelidoProfessorDisciplina');
     const cor = document.getElementById('corProfessor').value || '#3498db';
     const baseProfessor = document.getElementById('baseProfessor').value || 'TECNICA';
     const dispDiaTurno = coletarDisponibilidade('dispProfessor');
@@ -1454,6 +2640,14 @@ function salvarProfessor(e) {
     const disciplinas = disciplinasStr
         ? disciplinasStr.split(',').map(s => s.trim()).filter(Boolean)
         : [];
+
+    if (apelidoProfInput) {
+        const apelido = apelidoProfInput.value.trim();
+        const primeiraDisciplina = disciplinas.length ? disciplinas[0] : '';
+        if (primeiraDisciplina && apelido) {
+            apelidosDisciplinas[primeiraDisciplina] = apelido;
+        }
+    }
 
     if (id) {
         const p = professores.find(x => x.id === id);
@@ -1529,8 +2723,13 @@ function salvarProfessor(e) {
 
     salvarLocal();
     atualizarListaProfessores();
-    document.getElementById('formProfessor').reset();
+    const form = document.getElementById('formProfessor');
+    if (form) form.reset();
     document.getElementById('professorId').value = '';
+    if (apelidoProfInput) {
+        apelidoProfInput.value = '';
+        delete apelidoProfInput.dataset.manual;
+    }
 }
 
 function editarProfessor(id) {
@@ -1539,6 +2738,17 @@ function editarProfessor(id) {
     document.getElementById('professorId').value = p.id;
     document.getElementById('nomeProfessor').value = p.nome;
     document.getElementById('disciplinasProfessor').value = p.disciplinas.join(', ');
+    const apelidoProfInput = document.getElementById('apelidoProfessorDisciplina');
+    if (apelidoProfInput) {
+        const primeiraDisciplina = p.disciplinas && p.disciplinas.length ? p.disciplinas[0] : '';
+        if (primeiraDisciplina && apelidosDisciplinas[primeiraDisciplina]) {
+            apelidoProfInput.value = apelidosDisciplinas[primeiraDisciplina];
+            apelidoProfInput.dataset.manual = '1';
+        } else {
+            apelidoProfInput.value = '';
+            delete apelidoProfInput.dataset.manual;
+        }
+    }
     document.getElementById('corProfessor').value = p.cor;
     const baseValor = p.baseTipo || 'TECNICA';
     const hiddenBase = document.getElementById('baseProfessor');
@@ -1696,6 +2906,11 @@ function excluirCursoSelecionado() {
         return;
     }
 
+    if (cursoParaExcluir === CURSO_TEMPO_INTEGRAL) {
+        mostrarToast('O curso "Tempo Integral" é padrão do sistema e não pode ser excluído.', 'warning');
+        return;
+    }
+
     // Verifica se existem turmas vinculadas
     const turmasVinculadas = turmas.filter(t => t.curso === cursoParaExcluir);
     if (turmasVinculadas.length > 0) {
@@ -1767,7 +2982,7 @@ function atualizarSelectTurmasInsercaoRapida() {
     const sel = document.getElementById('rapidoTurma');
     if (!sel) return;
     const turnoSel = document.getElementById('rapidoTurno')?.value || '';
-    sel.innerHTML = '<option value="">Selecione...</option>';
+    sel.innerHTML = '';
     let lista = [...turmas];
     if (turnoSel) {
         lista = lista.filter(t => t.turno === turnoSel);
@@ -1784,35 +2999,65 @@ function atualizarSelectTurmasInsercaoRapida() {
 function aplicarInsercaoRapidaAuto() {
     const dados = obterDadosInsercaoRapida();
     const turno = dados.turno || turnoAtualGrade;
-    const turmaId = dados.turmaId;
     const disciplina = dados.disciplina;
     const professorId = dados.professorId || null;
     let quantidade = parseInt(dados.quantidade || '1', 10);
-    ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId, quantidade);
+    const turmaIds = Array.isArray(dados.turmaIds) && dados.turmaIds.length ? dados.turmaIds : (dados.turmaId ? [dados.turmaId] : []);
+    if (!turmaIds.length) {
+        mostrarToast('Selecione pelo menos uma turma na inserção rápida.', 'warning');
+        return;
+    }
+    let turmasSucesso = 0;
+    const turmasFalha = [];
+    turmaIds.forEach(idTurma => {
+        const ok = ajusteInteligenteInsercaoRapida(turno, idTurma, disciplina, professorId, quantidade);
+        if (ok) {
+            harmonizarFamiliasPortMatInsercaoRapida(turno, idTurma, professorId);
+            turmasSucesso++;
+        } else {
+            const turma = turmas.find(t => t.id === idTurma);
+            const nome = turma && turma.nome ? turma.nome : String(idTurma);
+            turmasFalha.push(nome);
+        }
+    });
+    if (turmasFalha.length) {
+        const nomes = turmasFalha.join(', ');
+        let msg = turmasSucesso > 0
+            ? `Inserção rápida aplicada em ${turmasSucesso} turma(s). Não foi possível alocar nas turmas: ${nomes}.`
+            : `Não foi possível alocar automaticamente nas turmas selecionadas: ${nomes}.`;
+        if (professorId) {
+            const diag = diagnosticoDisponibilidadeProfessorTurno(professorId, turno, quantidade);
+            if (diag && diag.capacidade === 0) {
+                msg += ` O professor selecionado não possui qualquer disponibilidade registrada neste turno. Para este pedido seriam necessários pelo menos ${quantidade} tempo(s) disponíveis no turno ${textoTurno(turno)}.`;
+            } else if (diag && diag.faltam > 0) {
+                msg += ` Possível causa: disponibilidade insuficiente do professor neste turno. Com a configuração atual, ele tem ${diag.livres} tempo(s) livre(s) no turno ${textoTurno(turno)}; para atender este pedido seriam necessários pelo menos ${diag.faltam} tempo(s) livres adicionais.`;
+            }
+        }
+        mostrarToast(msg, 'warning');
+    }
 }
 
 function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId, quantidade) {
     if (!turno || !turmaId || !disciplina) {
         mostrarToast('Informe turno, turma e disciplina na inserção rápida.', 'warning');
-        return;
+        return false;
     }
     if (isNaN(quantidade) || quantidade < 1) quantidade = 1;
     const quantidadeOriginal = quantidade;
-    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
-    const disciplinaEspecial =
-        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    const grupoDisc = grupoDisciplinaPortMat(disciplina);
+    const disciplinaEspecial = !!grupoDisc;
     if (disciplinaEspecial && quantidade >= 4) {
         const okEsp = aplicarInsercaoRapidaEspecialPortMat(turno, turmaId, disciplina, professorId, quantidade);
         if (!okEsp) {
             mostrarToast('Não foi possível alocar automaticamente 4 tempos (2+2) para esta disciplina com as regras atuais.', 'warning');
         }
-        return;
+        return !!okEsp;
     }
     const temposTurno = getTempos(turno);
     const temposValidos = temposTurno.filter(t => !t.intervalo);
     if (!temposValidos.length) {
         mostrarToast('Não há tempos configurados para este turno.', 'warning');
-        return;
+        return false;
     }
     const dias = diasInsercaoRapida();
     for (let d = 0; d < dias.length; d++) {
@@ -1829,7 +3074,7 @@ function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId
             if (tempoIds.length !== quantidade) continue;
             const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, tempoIds, disciplina, professorId);
             if (ok) {
-                return;
+                return true;
             }
         }
     }
@@ -1870,7 +3115,7 @@ function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId
         if (quantidadeOriginal === 1) {
             for (let d = 0; d < dias.length && restantes > 0; d++) {
                 const dia = dias[d];
-                for (let i = 1; i < temposValidos.length && restantes > 0; i++) {
+                for (let i = 0; i < temposValidos.length && restantes > 0; i++) {
                     const t = temposValidos[i];
                     const ok = tentarAplicarInsercaoRapida(turno, dia, turmaId, [t.id], disciplina, professorId);
                     if (ok) {
@@ -1895,11 +3140,12 @@ function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId
 
     if (inseridos === 0) {
         mostrarToast('Não foi possível alocar automaticamente as aulas com as regras atuais.', 'warning');
-        return;
+        return false;
     }
     if (inseridos < quantidadeOriginal) {
         mostrarToast(`Foram lançados ${inseridos} de ${quantidadeOriginal} tempos solicitados; não foi possível alocar todos com as regras atuais.`, 'warning');
     }
+    return true;
 }
 
 function atualizarListaTurmas() {
@@ -2025,13 +3271,14 @@ function salvarTurma(e) {
     const id = document.getElementById('turmaId').value;
     const nome = document.getElementById('nomeTurma').value.trim();
     const curso = document.getElementById('cursoTurma').value;
-    const turno = document.getElementById('turnoTurma').value;
+    const turnoRaw = document.getElementById('turnoTurma').value;
+    const turnosSelecionados = (turnoRaw || '').split(',').map(t => t.trim()).filter(t => t);
     const tipo = document.getElementById('tipoTurma').value;
     const ano = document.getElementById('anoTurma').value;
     const fase = document.getElementById('faseTurma').value;
     const descricao = document.getElementById('descricaoTurma').value.trim();
 
-    if (!nome || !curso || !turno || !tipo || !ano) {
+    if (!nome || !curso || !turnosSelecionados.length || !tipo || !ano) {
         mostrarToast('Preencha nome, curso, turno, tipo e ano.', 'warning');
         return;
     }
@@ -2041,7 +3288,7 @@ function salvarTurma(e) {
         if (t) {
             t.nome = nome;
             t.curso = curso;
-            t.turno = turno;
+            t.turno = turnosSelecionados[0];
             t.tipoTurma = tipo;
             t.anoTurma = ano;
             t.faseTurma = fase;
@@ -2049,17 +3296,24 @@ function salvarTurma(e) {
             mostrarToast('Turma atualizada com sucesso!');
         }
     } else {
-        turmas.push({
-            id: gerarId(),
-            nome,
-            curso,
-            turno,
-            tipoTurma: tipo,
-            anoTurma: ano,
-            faseTurma: fase,
-            descricao
+        turnosSelecionados.forEach(turno => {
+            turmas.push({
+                id: gerarId(),
+                nome,
+                curso,
+                turno,
+                tipoTurma: tipo,
+                anoTurma: ano,
+                faseTurma: fase,
+                descricao
+            });
         });
-        mostrarToast('Turma cadastrada com sucesso!');
+        if (turnosSelecionados.length > 1) {
+            const nomesTurnos = turnosSelecionados.map(t => textoTurno(t)).join(' e ');
+            mostrarToast(`Turma cadastrada nos turnos ${nomesTurnos} com sucesso!`);
+        } else {
+            mostrarToast('Turma cadastrada com sucesso!');
+        }
     }
 
     salvarLocal();
@@ -2319,7 +3573,8 @@ function salvarHorario(e) {
             }
         });
         if (indisponiveis.length > 0) {
-            if (!confirm(`O professor não está disponível em ${dia} / ${textoTurno(turno)} nos tempos: ${indisponiveis.join(', ')}. Deseja lançar mesmo assim?`)) {
+            const msgInd = `Professor não está disponível em ${dia} / ${textoTurno(turno)} nos tempos: ${indisponiveis.join(', ')}. Deseja continuar mesmo assim?`;
+            if (!confirm(msgInd)) {
                 return;
             }
         }
@@ -2332,7 +3587,8 @@ function salvarHorario(e) {
             }
         });
         if (conflitos.length > 0) {
-            if (!confirm(`O professor já tem aula nos seguintes horários: ${conflitos.join(', ')}. Deseja continuar mesmo assim?`)) {
+            const msgConf = `Professor já tem aula nos seguintes horários: ${conflitos.join(', ')}. Deseja continuar mesmo assim?`;
+            if (!confirm(msgConf)) {
                 return;
             }
         }
@@ -2353,14 +3609,13 @@ function salvarHorario(e) {
         return;
     }
 
-    const nomeDisciplinaNorm = (disciplina || '').toUpperCase();
-    const disciplinaSujeitaRegra =
-        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
+    const grupoDisc = grupoDisciplinaPortMat(disciplina);
+    const disciplinaSujeitaRegra = !!grupoDisc;
     if (disciplinaSujeitaRegra) {
         const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
             a.turmaId === turmaId &&
             a.dia === dia &&
-            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+            grupoDisciplinaPortMat(a.disciplina) === grupoDisc &&
             !tempoIds.includes(a.tempoId)
         );
         const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + tempoIds.length;
@@ -2429,6 +3684,20 @@ function montarGradeTurno(turno) {
         turmasTurno = turmasTurno.filter(t => t.curso === cursoVisualGrade);
     }
     turmasTurno = [...turmasTurno].sort(compararTurmasPorCursoETipo);
+
+    const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+    if (Array.isArray(ordemSalva) && ordemSalva.length) {
+        const mapaPos = new Map();
+        ordemSalva.forEach((id, idx) => {
+            if (!mapaPos.has(id)) mapaPos.set(id, idx);
+        });
+        turmasTurno.sort((a, b) => {
+            const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+            if (ia !== ib) return ia - ib;
+            return 0;
+        });
+    }
     if (!turmasTurno.length) {
         const msg = modoVisualGrade === 'CURSO' && cursoVisualGrade
             ? 'Não há turmas deste curso neste turno.'
@@ -2437,7 +3706,15 @@ function montarGradeTurno(turno) {
         return;
     }
 
-    // Cabeçalho: DIA | HORÁRIO | TURMAS...
+    const mapaContagemDisciplinaTurma = {};
+    aulas.forEach(a => {
+        if (a.turno !== turno) return;
+        if (!a.turmaId || !a.disciplina) return;
+        const profKey = a.professorId || '';
+        const chave = a.turmaId + '||' + a.disciplina + '||' + profKey;
+        mapaContagemDisciplinaTurma[chave] = (mapaContagemDisciplinaTurma[chave] || 0) + 1;
+    });
+
     const thead = document.createElement('thead');
     const trHead = document.createElement('tr');
 
@@ -2451,9 +3728,12 @@ function montarGradeTurno(turno) {
     thHor.className = 'horario-col';
     trHead.appendChild(thHor);
 
-    turmasTurno.forEach(turma => {
+    turmasTurno.forEach((turma, idxTurma) => {
         const th = document.createElement('th');
         th.className = 'turma-col';
+        th.setAttribute('draggable', 'true');
+        th.dataset.turmaId = turma.id;
+        th.dataset.colIndex = String(idxTurma + 2);
 
         const span = document.createElement('span');
         span.innerHTML =
@@ -2514,7 +3794,7 @@ function montarGradeTurno(turno) {
             } else {
                 turmasTurno.forEach(turma => {
                     const td = document.createElement('td');
-                    
+
                     const aula = obterAula(turno, dia, turma.id, tempo.id);
                     if (aula) {
                         td.className = 'celula-aula';
@@ -2533,10 +3813,28 @@ function montarGradeTurno(turno) {
                         bloco.style.display = 'flex';
                         bloco.style.flexDirection = 'column';
                         bloco.style.justifyContent = 'center';
+                        bloco.style.position = 'relative';
 
                         bloco.innerHTML =
                             '<strong>' + abreviar(apelidarDisciplina(aula.disciplina), 14) + '</strong>' +
                             '<small>' + (prof ? abreviar(prof.nome, 14) : 'Sem professor') + '</small>';
+
+                        const chaveCont = turma.id + '||' + (aula.disciplina || '') + '||' + (aula.professorId || '');
+                        const totalDisciplinaTurma = mapaContagemDisciplinaTurma[chaveCont] || 0;
+                        if (totalDisciplinaTurma > 0) {
+                            const badge = document.createElement('div');
+                            badge.textContent = totalDisciplinaTurma;
+                            badge.style.position = 'absolute';
+                            badge.style.top = '2px';
+                            badge.style.right = '4px';
+                            badge.style.fontSize = '0.55rem';
+                            badge.style.color = '#333';
+                            badge.style.backgroundColor = 'rgba(255,255,255,0.8)';
+                            badge.style.padding = '0 2px';
+                            badge.style.borderRadius = '2px';
+                            badge.style.pointerEvents = 'none';
+                            bloco.appendChild(badge);
+                        }
 
                         bloco.onclick = (ev) => {
                             ev.stopPropagation();
@@ -2564,12 +3862,16 @@ function montarGradeTurno(turno) {
                     }
 
                     td.onclick = (ev) => {
-                        if (ev.target === td || ev.target === td.firstChild) {
-                            if (aula) {
+                        if (ev.ctrlKey) {
+                            alternarSelecaoCelula(td);
+                            return;
+                        }
+                        if (aula) {
+                            if (ev.target === td || ev.target === td.firstChild) {
                                 abrirEditorCelula(aula);
-                            } else {
-                                abrirEditorCelulaVazia(turno, dia, turma.id, tempo.id);
                             }
+                        } else {
+                            abrirEditorCelulaVazia(turno, dia, turma.id, tempo.id);
                         }
                     };
 
@@ -2577,6 +3879,10 @@ function montarGradeTurno(turno) {
                     td.dataset.dia = dia;
                     td.dataset.turmaId = turma.id;
                     td.dataset.tempoId = tempo.id;
+                    td.oncontextmenu = (ev) => {
+                        ev.preventDefault();
+                        abrirMenuContextoGrade(ev, td);
+                    };
                     td.addEventListener('dragover', (ev) => {
                         if (!tempo.intervalo) {
                             ev.preventDefault();
@@ -2610,78 +3916,25 @@ function montarGradeTurno(turno) {
                                 mostrarToast('Professor não encontrado.', 'error');
                                 return;
                             }
-                            if (!professorDisponivelNoHorario(prof, turno, dia, tempo.id)) {
-                                const temposTurno = getTempos(turno).filter(t => !t.intervalo);
-                                const diasForaDisp = new Set();
-                                aulas.forEach(a => {
-                                    if (a.professorId === profId && a.turno === turno) {
-                                        if (!professorDisponivelNoHorario(prof, a.turno, a.dia, a.tempoId)) {
-                                            diasForaDisp.add(a.dia);
-                                        }
-                                    }
-                                });
-                                const diasComDisp = DIAS_SEMANA.filter(diaSigla =>
-                                    temposTurno.some(t => professorDisponivelNoHorario(prof, turno, diaSigla, t.id))
-                                );
-
-                                let msg = 'Este professor não está disponível neste dia/turno/tempo.\n\n';
-                                if (diasComDisp.length && temposTurno.length) {
-                                    const pad = function (text, width) {
-                                        text = String(text);
-                                        if (text.length >= width) return text;
-                                        return text + ' '.repeat(width - text.length);
-                                    };
-                                    msg += 'Disponibilidades deste professor no turno ' + turno + ':\n';
-                                    const colTempoWidth = 6;
-                                    const colDiaWidth = 12;
-                                    const headerTempo = pad('Tp', colTempoWidth);
-                                    const headerDias = diasComDisp.map(d => {
-                                        let nome = textoDia(d).slice(0, 3);
-                                        if (diasForaDisp.has(d)) {
-                                            nome = '*' + nome + '*';
-                                        }
-                                        return pad(nome, colDiaWidth);
-                                    });
-                                    msg += headerTempo + ' | ' + headerDias.join(' | ') + '\n';
-                                    msg += ''.padEnd(headerTempo.length + 3 + headerDias.length * (colDiaWidth + 3) - 3, '-') + '\n';
-
-                                    temposTurno.forEach((t, idxTempo) => {
-                                        const rotuloTempo = pad((idxTempo + 1) + 'º', colTempoWidth);
-                                        const cols = diasComDisp.map(diaSigla =>
-                                            professorDisponivelNoHorario(prof, turno, diaSigla, t.id)
-                                                ? pad(t.inicio + '-' + t.fim, colDiaWidth)
-                                                : pad('', colDiaWidth)
-                                        );
-                                        msg += rotuloTempo + ' | ' + cols.join(' | ') + '\n';
-                                    });
-                                } else {
-                                    msg += 'Não há qualquer tempo disponível para este professor neste turno.\n';
-                                }
-
-                                msg += '\nDeseja continuar mesmo assim?';
-                                const continuarDisp = confirm(msg);
-                                if (!continuarDisp) return;
+                            if (!confirmarDisponibilidadeProfessorDetalhada(prof, turno, dia, tempo.id)) {
+                                return;
                             }
-                            if (verificarConflitoProfessor(profId, turno, dia, tempo.id)) {
-                                const continuar = confirm('Este professor já tem aula neste mesmo horário. Deseja continuar mesmo assim?');
-                                if (!continuar) return;
+                            if (!confirmarConflitoProfessorDetalhado(profId, turno, dia, tempo.id, turma.id)) {
+                                return;
                             }
                         }
-                        const nomeDisciplinaNorm = (src.disciplina || '').toUpperCase();
-                        const disciplinaSujeitaRegra =
-                            nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
-                        if (disciplinaSujeitaRegra) {
+                        const grupoDisc = grupoDisciplinaPortMat(src.disciplina);
+                        if (grupoDisc) {
                             const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
                                 a.turmaId === turma.id &&
                                 a.dia === dia &&
-                                (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
+                                grupoDisciplinaPortMat(a.disciplina) === grupoDisc &&
                                 !(a.turno === turno && a.dia === dia && a.turmaId === turma.id && a.tempoId === tempo.id)
                             );
                             const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + 1;
                             const limite = 2;
                             if (totalFinalDiscDia > limite) {
-                                mostrarToast(`Não é permitido lançar mais de ${limite} tempos da mesma disciplina no mesmo dia para esta turma.`, 'warning');
-                                return;
+                                mostrarToast('Boas práticas pedagógicas sugerem não concentrar mais de 2 tempos de Português ou Matemática no mesmo dia para a mesma turma.', 'warning');
                             }
                         }
                         capturarEstadoAulas();
@@ -2715,7 +3968,57 @@ function montarGradeTurno(turno) {
     });
 
     tabela.appendChild(tbody);
+
+    const thTurmaCols = Array.from(thead.querySelectorAll('th.turma-col'));
+    let dragSrcColIndex = null;
+
+    thTurmaCols.forEach(th => {
+        th.addEventListener('dragstart', (ev) => {
+            dragSrcColIndex = Array.from(th.parentElement.children).indexOf(th);
+            ev.dataTransfer.effectAllowed = 'move';
+        });
+        th.addEventListener('dragover', (ev) => {
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+        });
+        th.addEventListener('drop', (ev) => {
+            ev.preventDefault();
+            const destIndex = Array.from(th.parentElement.children).indexOf(th);
+            if (dragSrcColIndex === null || dragSrcColIndex === destIndex) return;
+
+            const table = th.closest('table');
+            if (!table) return;
+
+            const rows = Array.from(table.rows);
+            rows.forEach(row => {
+                if (dragSrcColIndex < row.cells.length && destIndex < row.cells.length) {
+                    const srcCell = row.cells[dragSrcColIndex];
+                    const destCell = row.cells[destIndex];
+                    if (srcCell && destCell && srcCell !== destCell) {
+                        const refNode = dragSrcColIndex < destIndex ? destCell.nextSibling : destCell;
+                        row.insertBefore(srcCell, refNode);
+                    }
+                }
+            });
+
+            const headerRow = thead.querySelector('tr');
+            if (headerRow) {
+                const cols = Array.from(headerRow.querySelectorAll('th.turma-col'));
+                const novaOrdemIds = cols
+                    .map(c => c.dataset.turmaId)
+                    .filter(Boolean);
+                ORDEM_TURMAS_POR_TURNO[turno] = novaOrdemIds;
+                try {
+                    localStorage.setItem(`${APP_PREFIX}ordem_turmas_turno`, JSON.stringify(ORDEM_TURMAS_POR_TURNO));
+                } catch (e) {}
+            }
+
+            dragSrcColIndex = null;
+        });
+    });
+
     atualizarIndicadorDesfazerTurno();
+    atualizarIndicadorRefazerTurno();
 }
 
 // editor ao clicar em aula (abre MODAL)
@@ -2730,6 +4033,18 @@ function abrirEditorCelula(aula) {
     document.getElementById('modalDia').value = textoDia(aula.dia);
     document.getElementById('modalHorario').value = tempo ? `${tempo.inicio} - ${tempo.fim}` : '';
     document.getElementById('modalDisciplina').value = aula.disciplina;
+    const campoApelidoModal = document.getElementById('modalApelidoDisciplina');
+    if (campoApelidoModal) {
+        const nomeDisc = aula.disciplina || '';
+        let valor = '';
+        if (nomeDisc && Object.prototype.hasOwnProperty.call(apelidosDisciplinas, nomeDisc)) {
+            valor = apelidosDisciplinas[nomeDisc] || '';
+        } else if (nomeDisc.length > 10) {
+            valor = sugerirApelidoDisciplina(nomeDisc);
+        }
+        campoApelidoModal.value = valor;
+        delete campoApelidoModal.dataset.manual;
+    }
     document.getElementById('modalProfessor').value = aula.professorId || '';
 
     document.getElementById('modalAula').style.display = 'flex';
@@ -2767,11 +4082,19 @@ function salvarEdicaoAula(e) {
     }
 
     const disc = document.getElementById('modalDisciplina').value.trim();
+    const campoApelidoModal = document.getElementById('modalApelidoDisciplina');
     const profId = document.getElementById('modalProfessor').value || null;
 
     if (!disc) {
         mostrarToast('Informe a disciplina.', 'warning');
         return;
+    }
+
+    if (campoApelidoModal) {
+        const apelido = campoApelidoModal.value.trim();
+        if (disc && apelido) {
+            apelidosDisciplinas[disc] = apelido;
+        }
     }
 
     if (profId) {
@@ -2780,86 +4103,27 @@ function salvarEdicaoAula(e) {
             mostrarToast('Professor não encontrado.', 'error');
             return;
         }
-
-            if (!professorDisponivelNoHorario(prof, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId)) {
-                const turno = aulaEmEdicao.turno;
-                const dia = aulaEmEdicao.dia;
-                const temposTurno = getTempos(turno).filter(t => !t.intervalo);
-            const diasForaDisp = new Set();
-            aulas.forEach(a => {
-                if (a.professorId === profId && a.turno === turno) {
-                    if (!professorDisponivelNoHorario(prof, a.turno, a.dia, a.tempoId)) {
-                        diasForaDisp.add(a.dia);
-                    }
-                }
-            });
-            const diasComDisp = DIAS_SEMANA.filter(diaSigla =>
-                temposTurno.some(t => professorDisponivelNoHorario(prof, turno, diaSigla, t.id))
-            );
-
-            let msg = 'Este professor não está disponível neste dia/turno/tempo.\n\n';
-            if (diasComDisp.length && temposTurno.length) {
-                const pad = function (text, width) {
-                    text = String(text);
-                    if (text.length >= width) return text;
-                    return text + ' '.repeat(width - text.length);
-                };
-                msg += 'Disponibilidades deste professor no turno ' + turno + ':\n';
-                const colTempoWidth = 6;
-                const colDiaWidth = 12;
-                const headerTempo = pad('Tp', colTempoWidth);
-                const headerDias = diasComDisp.map(d => {
-                    let nome = textoDia(d).slice(0, 3);
-                    if (diasForaDisp.has(d)) {
-                        nome = '*' + nome + '*';
-                    }
-                    return pad(nome, colDiaWidth);
-                });
-                msg += headerTempo + ' | ' + headerDias.join(' | ') + '\n';
-                msg += ''.padEnd(headerTempo.length + 3 + headerDias.length * (colDiaWidth + 3) - 3, '-') + '\n';
-
-                temposTurno.forEach((t, idxTempo) => {
-                    const rotuloTempo = pad((idxTempo + 1) + 'º', colTempoWidth);
-                    const cols = diasComDisp.map(diaSigla =>
-                        professorDisponivelNoHorario(prof, turno, diaSigla, t.id)
-                            ? pad(t.inicio + '-' + t.fim, colDiaWidth)
-                            : pad('', colDiaWidth)
-                    );
-                    msg += rotuloTempo + ' | ' + cols.join(' | ') + '\n';
-                });
-            } else {
-                msg += 'Não há qualquer tempo disponível para este professor neste turno.\n';
-            }
-
-            msg += '\nDeseja continuar mesmo assim?';
-            if (!confirm(msg)) {
-                return;
-            }
+        if (!confirmarDisponibilidadeProfessorDetalhada(prof, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId)) {
+            return;
         }
-
         const idParaIgnorar = aulaEmEdicao.id === 'novo' ? null : aulaEmEdicao.id;
-        if (verificarConflitoProfessor(profId, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId, idParaIgnorar)) {
-            if (!confirm('Este professor já tem aula neste mesmo horário. Deseja continuar mesmo assim?')) {
-                return;
-            }
+        if (!confirmarConflitoProfessorDetalhado(profId, aulaEmEdicao.turno, aulaEmEdicao.dia, aulaEmEdicao.tempoId, aulaEmEdicao.turmaId, idParaIgnorar)) {
+            return;
         }
     }
 
-    const nomeDisciplinaNorm = (disc || '').toUpperCase();
-    const disciplinaSujeitaRegra =
-        nomeDisciplinaNorm.includes('PORTUG') || nomeDisciplinaNorm.includes('MATEM');
-    if (disciplinaSujeitaRegra) {
+    const grupoDisc = grupoDisciplinaPortMat(disc);
+    if (grupoDisc) {
         const aulasMesmoDiaMesmaDisciplina = aulas.filter(a =>
             a.turmaId === aulaEmEdicao.turmaId &&
             a.dia === aulaEmEdicao.dia &&
-            (a.disciplina || '').toUpperCase() === nomeDisciplinaNorm &&
-            a.id !== aulaEmEdicao.id
+            grupoDisciplinaPortMat(a.disciplina) === grupoDisc &&
+            a.id !== (aulaEmEdicao.id === 'novo' ? null : aulaEmEdicao.id)
         );
         const totalFinalDiscDia = aulasMesmoDiaMesmaDisciplina.length + 1;
         const limite = 2;
         if (totalFinalDiscDia > limite) {
-            mostrarToast(`Não é permitido lançar mais de ${limite} tempos da mesma disciplina no mesmo dia para esta turma.`, 'warning');
-            return;
+            mostrarToast('Boas práticas pedagógicas sugerem não concentrar mais de 2 tempos de Português ou Matemática no mesmo dia para a mesma turma.', 'warning');
         }
     }
 
@@ -2999,6 +4263,204 @@ function limparAulasDiaSemana() {
 // AJUSTE INTELIGENTE
 // =======================
 
+function redistribuirTurmaTurnoPorInsercaoRapida(turma, turno) {
+    const aulasTurmaTurno = aulas.filter(a =>
+        a.turno === turno &&
+        a.turmaId === turma.id &&
+        a.disciplina
+    );
+    if (!aulasTurmaTurno.length) return;
+    const grupos = {};
+    aulasTurmaTurno.forEach(a => {
+        const discKey = (a.disciplina || '').toUpperCase();
+        const profKey = a.professorId || '';
+        const key = profKey + '|' + discKey;
+        if (!grupos[key]) grupos[key] = [];
+        grupos[key].push(a);
+    });
+    const mapaFamiliasEspeciais = {};
+    Object.keys(grupos).forEach(key => {
+        const partes = key.split('|');
+        const profKey = partes[0] || '';
+        const discKey = partes.slice(1).join('|') || '';
+        const tipoFamilia = grupoDisciplinaPortMat(discKey);
+        if (!tipoFamilia) return;
+        const familyKey = profKey + '||' + tipoFamilia;
+        if (!mapaFamiliasEspeciais[familyKey]) {
+            mapaFamiliasEspeciais[familyKey] = {
+                professorId: profKey || null,
+                tipo: tipoFamilia,
+                keys: [],
+                aulas: [],
+                total: 0
+            };
+        }
+        mapaFamiliasEspeciais[familyKey].keys.push(key);
+        const listaGrupo = grupos[key] || [];
+        mapaFamiliasEspeciais[familyKey].aulas.push(...listaGrupo);
+        mapaFamiliasEspeciais[familyKey].total += listaGrupo.length;
+    });
+    const familiasParaTratar = Object.values(mapaFamiliasEspeciais).filter(f => f.total === 4 && f.keys.length > 1);
+    familiasParaTratar.forEach(f => {
+        f.keys.forEach(k => {
+            delete grupos[k];
+        });
+    });
+    const chavesGrupos = Object.keys(grupos);
+    if (!chavesGrupos.length && !familiasParaTratar.length) return;
+    chavesGrupos.sort((k1, k2) => {
+        const profId1 = (k1.split('|')[0] || '') || null;
+        const profId2 = (k2.split('|')[0] || '') || null;
+        const p1 = prioridadeProfessorAlocacao(profId1);
+        const p2 = prioridadeProfessorAlocacao(profId2);
+        if (p1 !== p2) return p1 - p2;
+        const g1 = grupos[k1] || [];
+        const g2 = grupos[k2] || [];
+        return g2.length - g1.length;
+    });
+    aulas = aulas.filter(a =>
+        !(a.turno === turno &&
+          a.turmaId === turma.id &&
+          a.disciplina)
+    );
+    familiasParaTratar.forEach(f => {
+        const grupoAulas = f.aulas || [];
+        if (!grupoAulas.length) return;
+        const base = grupoAulas.find(a => grupoDisciplinaPortMat(a.disciplina) === f.tipo) || grupoAulas[0];
+        const disciplinaBase = base.disciplina;
+        const professorId = base.professorId || null;
+        const quantidade = grupoAulas.length;
+        const ok = ajusteInteligenteInsercaoRapida(turno, turma.id, disciplinaBase, professorId, quantidade);
+        if (!ok) {
+            grupoAulas.forEach(a => aulas.push(a));
+            return;
+        }
+        const contPorDisciplina = {};
+        grupoAulas.forEach(a => {
+            const nome = a.disciplina || '';
+            contPorDisciplina[nome] = (contPorDisciplina[nome] || 0) + 1;
+        });
+        Object.keys(contPorDisciplina).forEach(nome => {
+            if (nome === disciplinaBase) return;
+            let restantes = contPorDisciplina[nome];
+            if (restantes <= 0) return;
+            const candidatas = aulas.filter(a =>
+                a.turno === turno &&
+                a.turmaId === turma.id &&
+                (a.professorId || null) === professorId &&
+                (a.disciplina || '') === disciplinaBase
+            );
+            for (let i = 0; i < candidatas.length && restantes > 0; i++) {
+                candidatas[i].disciplina = nome;
+                restantes--;
+            }
+        });
+    });
+    chavesGrupos.forEach(key => {
+        const grupo = grupos[key];
+        if (!grupo || !grupo.length) return;
+        const base = grupo[0];
+        const disciplina = base.disciplina;
+        const professorId = base.professorId || null;
+        const quantidade = grupo.length;
+        const ok = ajusteInteligenteInsercaoRapida(turno, turma.id, disciplina, professorId, quantidade);
+        if (!ok) {
+            grupo.forEach(a => aulas.push(a));
+        }
+    });
+}
+
+function harmonizarFamiliasPortMatInsercaoRapida(turno, turmaId, professorId) {
+    if (!professorId) return;
+    const aulasTurmaTurno = aulas.filter(a =>
+        a.turno === turno &&
+        a.turmaId === turmaId &&
+        a.disciplina &&
+        a.professorId
+    );
+    if (!aulasTurmaTurno.length) return;
+    const grupos = {};
+    aulasTurmaTurno.forEach(a => {
+        const discKey = (a.disciplina || '').toUpperCase();
+        const profKey = a.professorId || '';
+        if (profKey !== professorId) return;
+        const key = profKey + '|' + discKey;
+        if (!grupos[key]) grupos[key] = [];
+        grupos[key].push(a);
+    });
+    const mapaFamiliasEspeciais = {};
+    Object.keys(grupos).forEach(key => {
+        const partes = key.split('|');
+        const profKey = partes[0] || '';
+        const discKey = partes.slice(1).join('|') || '';
+        const tipoFamilia = grupoDisciplinaPortMat(discKey);
+        if (!tipoFamilia) return;
+        const familyKey = profKey + '||' + tipoFamilia;
+        if (!mapaFamiliasEspeciais[familyKey]) {
+            mapaFamiliasEspeciais[familyKey] = {
+                professorId: profKey || null,
+                tipo: tipoFamilia,
+                aulas: [],
+                total: 0
+            };
+        }
+        const listaGrupo = grupos[key] || [];
+        mapaFamiliasEspeciais[familyKey].aulas.push(...listaGrupo);
+        mapaFamiliasEspeciais[familyKey].total += listaGrupo.length;
+    });
+    const familiasParaTratar = Object.values(mapaFamiliasEspeciais).filter(f => f.total === 4);
+    if (!familiasParaTratar.length) return;
+    familiasParaTratar.forEach(f => {
+        const grupoAulas = f.aulas || [];
+        if (!grupoAulas.length) return;
+        const base = grupoAulas.find(a => grupoDisciplinaPortMat(a.disciplina) === f.tipo) || grupoAulas[0];
+        const disciplinaBase = base.disciplina;
+        const profId = base.professorId || null;
+        const quantidade = grupoAulas.length;
+        const contPorDisciplina = {};
+        grupoAulas.forEach(a => {
+            const nome = a.disciplina || '';
+            contPorDisciplina[nome] = (contPorDisciplina[nome] || 0) + 1;
+        });
+        const backup = JSON.stringify(aulas);
+        const idsFamilia = new Set(grupoAulas.map(a => a.id));
+        aulas = aulas.filter(a => !idsFamilia.has(a.id));
+        const ok = ajusteInteligenteInsercaoRapida(turno, turmaId, disciplinaBase, profId, quantidade);
+        if (!ok) {
+            aulas = JSON.parse(backup);
+            return;
+        }
+        const aulasAntes = JSON.parse(backup);
+        const idsAntes = new Set(aulasAntes.map(a => a.id));
+        const novos = aulas.filter(a =>
+            !idsAntes.has(a.id) &&
+            a.turno === turno &&
+            a.turmaId === turmaId &&
+            (a.professorId || null) === profId &&
+            (a.disciplina || '') === disciplinaBase
+        );
+        if (!novos.length) {
+            aulas = JSON.parse(backup);
+            return;
+        }
+        novos.sort((a, b) => {
+            if (a.dia === b.dia) return a.tempoId - b.tempoId;
+            return a.dia < b.dia ? -1 : 1;
+        });
+        let idx = 0;
+        Object.keys(contPorDisciplina).forEach(nome => {
+            let qtd = contPorDisciplina[nome];
+            while (qtd > 0 && idx < novos.length) {
+                novos[idx].disciplina = nome;
+                idx++;
+                qtd--;
+            }
+        });
+    });
+    salvarLocal();
+    montarGradeTurno(turnoAtualGrade);
+}
+
 function ajusteInteligente() {
     if (!confirm('O ajuste inteligente vai tentar compactar os horários (evitar buracos) neste turno. Continuar?')) {
         return;
@@ -3011,142 +4473,214 @@ function ajusteInteligente() {
         return;
     }
 
+    const snapshotInicial = JSON.stringify(aulas);
+    const infoInicial = calcularQualidadeAjusteTurno(turno);
+    const qualidadeInicial = infoInicial.percentual;
+    let melhorAnterior = typeof melhorPercentualAjustePorTurno[turno] === 'number'
+        ? melhorPercentualAjustePorTurno[turno]
+        : qualidadeInicial;
+    if (melhorAnterior < qualidadeInicial) {
+        melhorAnterior = qualidadeInicial;
+    }
+
+    let melhorSnapshot = snapshotInicial;
+    let melhorQualidade = qualidadeInicial;
+    let melhorInfo = infoInicial;
+
     capturarEstadoAulas();
 
-    // só considera tempos não intervalos
     const temposValidos = getTempos(turnoAtualGrade).filter(t => !t.intervalo);
 
-    turmasTurno.forEach(turma => {
-        DIAS_SEMANA.forEach(dia => {
-            const aulasDia = temposValidos.map(tempo => {
-                const aula = obterAula(turno, dia, turma.id, tempo.id) || null;
-                return aula;
-            });
-            const compactadasWrap = aulasDia
-                .map((a, idx) => a ? { aula: a, idxOriginal: idx } : null)
-                .filter(Boolean);
-            if (!compactadasWrap.length) {
-                return;
-            }
-            const ordemDisciplina = {};
-            compactadasWrap.forEach(w => {
-                const chave = (w.aula.disciplina || '').toUpperCase();
-                if (!(chave in ordemDisciplina)) {
-                    ordemDisciplina[chave] = w.idxOriginal;
+    for (let tentativa = 0; tentativa < 10; tentativa++) {
+        turmasTurno.forEach(turma => {
+            DIAS_SEMANA.forEach(dia => {
+                const aulasDia = temposValidos.map(tempo =>
+                    obterAula(turno, dia, turma.id, tempo.id) || null
+                );
+                const compactadas = aulasDia.filter(a => a !== null);
+                if (!compactadas.length) {
+                    return;
                 }
-            });
-            compactadasWrap.sort((w1, w2) => {
-                const d1 = (w1.aula.disciplina || '').toUpperCase();
-                const d2 = (w2.aula.disciplina || '').toUpperCase();
-                const o1 = ordemDisciplina[d1] ?? w1.idxOriginal;
-                const o2 = ordemDisciplina[d2] ?? w2.idxOriginal;
-                if (o1 !== o2) return o1 - o2;
-                return w1.idxOriginal - w2.idxOriginal;
-            });
-            const contDiscDia = {};
-            compactadasWrap.forEach(w => {
-                const chave = (w.aula.disciplina || '').toUpperCase();
-                contDiscDia[chave] = (contDiscDia[chave] || 0) + 1;
-            });
-            const blocosMulti = compactadasWrap.filter(w => {
-                const chave = (w.aula.disciplina || '').toUpperCase();
-                return contDiscDia[chave] > 1;
-            });
-            const blocosSingle = compactadasWrap.filter(w => {
-                const chave = (w.aula.disciplina || '').toUpperCase();
-                return contDiscDia[chave] === 1;
-            });
-            const blocosMultiOrdenados = [...blocosMulti].sort((w1, w2) => {
-                const d1 = (w1.aula.disciplina || '').toUpperCase();
-                const d2 = (w2.aula.disciplina || '').toUpperCase();
-                const c1 = contDiscDia[d1] || 0;
-                const c2 = contDiscDia[d2] || 0;
-                if (c1 !== c2) return c2 - c1;
-                const o1 = ordemDisciplina[d1] ?? w1.idxOriginal;
-                const o2 = ordemDisciplina[d2] ?? w2.idxOriginal;
-                if (o1 !== o2) return o1 - o2;
-                return w1.idxOriginal - w2.idxOriginal;
-            });
-            const novaOrdem = blocosMultiOrdenados.concat(blocosSingle);
-            aulas = aulas.filter(a =>
-                !(a.turno === turno && a.dia === dia && a.turmaId === turma.id)
-            );
-            novaOrdem.forEach((wrap, idx) => {
-                const aula = wrap.aula;
-                const novoTempo = temposValidos[idx];
-                if (novoTempo) {
-                    let podeMover = true;
-                    if (aula.professorId) {
-                        const prof = professores.find(p => p.id === aula.professorId);
-                        if (prof) {
-                            if (!professorDisponivelNoHorario(prof, turno, dia, novoTempo.id)) {
-                                podeMover = false;
+
+                const gruposDisciplina = {};
+                compactadas.forEach(a => {
+                    const chaveDisc = (a.disciplina || '') + '|' + (a.professorId || '');
+                    if (!gruposDisciplina[chaveDisc]) {
+                        gruposDisciplina[chaveDisc] = [];
+                    }
+                    gruposDisciplina[chaveDisc].push(a);
+                });
+                const ordemProcessamento = [];
+                const processados = new Set();
+                Object.values(gruposDisciplina).forEach(lista => {
+                    if (lista.length >= 2) {
+                        lista.forEach(a => {
+                            ordemProcessamento.push(a);
+                            if (a.id != null) {
+                                processados.add(a.id);
+                            }
+                        });
+                    }
+                });
+                Object.values(gruposDisciplina).forEach(lista => {
+                    if (lista.length === 1) {
+                        const a = lista[0];
+                        if (a && a.id != null && !processados.has(a.id)) {
+                            ordemProcessamento.push(a);
+                            processados.add(a.id);
+                        } else if (a && a.id == null) {
+                            ordemProcessamento.push(a);
+                        }
+                    }
+                });
+
+                const aulasOutrasTurmas = aulas.filter(a =>
+                    !(a.turno === turno && a.dia === dia && a.turmaId === turma.id)
+                );
+
+                const novasAulasDia = [];
+                const temposUsados = new Set();
+
+                ordemProcessamento.forEach(aula => {
+                    const profId = aula.professorId || null;
+                    const tempoOriginalId = aula.tempoId;
+                    let tempoEscolhidoId = null;
+
+                    for (let i = 0; i < temposValidos.length; i++) {
+                        const tempo = temposValidos[i];
+                        if (temposUsados.has(tempo.id)) continue;
+
+                        let podeUsar = true;
+
+                        if (profId) {
+                            const prof = professores.find(p => p.id === profId);
+                            if (!prof) {
+                                podeUsar = false;
                             } else {
-                                const conflitoGlobal = aulas.some(a =>
-                                    a.professorId === aula.professorId &&
+                                if (!professorDisponivelNoHorario(prof, turno, dia, tempo.id)) {
+                                    podeUsar = false;
+                                }
+                            }
+
+                            if (podeUsar) {
+                                const conflitoProfessor = aulasOutrasTurmas.some(a =>
+                                    a.professorId === profId &&
                                     a.turno === turno &&
                                     a.dia === dia &&
-                                    a.tempoId === novoTempo.id
+                                    a.tempoId === tempo.id
                                 );
-                                if (conflitoGlobal) {
-                                    podeMover = false;
+                                if (conflitoProfessor) {
+                                    podeUsar = false;
                                 }
                             }
                         }
+
+                        if (podeUsar) {
+                            tempoEscolhidoId = tempo.id;
+                            break;
+                        }
                     }
-                    if (podeMover) {
-                        aula.tempoId = novoTempo.id;
+
+                    if (!tempoEscolhidoId) {
+                        const tempoOriginalExiste = temposValidos.some(t => t.id === tempoOriginalId);
+                        if (tempoOriginalExiste && !temposUsados.has(tempoOriginalId)) {
+                            let podeManter = true;
+                            if (profId) {
+                                const prof = professores.find(p => p.id === profId);
+                                if (!prof || !professorDisponivelNoHorario(prof, turno, dia, tempoOriginalId)) {
+                                    podeManter = false;
+                                } else {
+                                    const conflitoOriginal = aulasOutrasTurmas.some(a =>
+                                        a.professorId === profId &&
+                                        a.turno === turno &&
+                                        a.dia === dia &&
+                                        a.tempoId === tempoOriginalId
+                                    );
+                                    if (conflitoOriginal) {
+                                        podeManter = false;
+                                    }
+                                }
+                            }
+                            if (podeManter) {
+                                tempoEscolhidoId = tempoOriginalId;
+                            }
+                        }
                     }
-                }
-                aulas.push(aula);
+
+                    if (!tempoEscolhidoId) {
+                        tempoEscolhidoId = tempoOriginalId;
+                    }
+
+                    temposUsados.add(tempoEscolhidoId);
+                    aula.tempoId = tempoEscolhidoId;
+                    novasAulasDia.push(aula);
+                });
+
+                aulas = aulas.filter(a =>
+                    !(a.turno === turno && a.dia === dia && a.turmaId === turma.id)
+                );
+                novasAulasDia.forEach(aula => {
+                    aulas.push(aula);
+                });
             });
         });
-    });
 
+        turmasTurno.forEach(turma => {
+            const profsTurma = new Set(
+                aulas
+                    .filter(a =>
+                        a.turno === turno &&
+                        a.turmaId === turma.id &&
+                        a.professorId
+                    )
+                    .map(a => a.professorId)
+            );
+            profsTurma.forEach(profId => {
+                harmonizarFamiliasPortMatInsercaoRapida(turno, turma.id, profId);
+            });
+        });
+
+        const infoDepois = calcularQualidadeAjusteTurno(turno);
+        const qualidadeDepois = infoDepois.percentual;
+        if (qualidadeDepois > melhorQualidade) {
+            melhorQualidade = qualidadeDepois;
+            melhorInfo = infoDepois;
+            melhorSnapshot = JSON.stringify(aulas);
+        }
+    }
+
+    if (melhorQualidade < melhorAnterior) {
+        aulas = JSON.parse(snapshotInicial);
+        salvarLocal();
+        montarGradeTurno(turnoAtualGrade);
+        mostrarToast(
+            `Ajuste inteligente não melhorou a alocação (mantido em ${melhorAnterior}%). Os horários anteriores foram preservados.`,
+            'warning'
+        );
+        return;
+    }
+
+    const houveAlteracao = melhorSnapshot !== snapshotInicial;
+
+    if (!houveAlteracao) {
+        aulas = JSON.parse(snapshotInicial);
+        melhorPercentualAjustePorTurno[turno] = melhorQualidade;
+        salvarLocal();
+        montarGradeTurno(turnoAtualGrade);
+        mostrarToast(
+            `Ajuste inteligente executado, mas não foi necessário alterar os horários deste turno (já estão na melhor configuração encontrada: ${melhorQualidade}%).`,
+            'info'
+        );
+        return;
+    }
+
+    aulas = JSON.parse(melhorSnapshot);
+    melhorPercentualAjustePorTurno[turno] = melhorQualidade;
     salvarLocal();
     montarGradeTurno(turnoAtualGrade);
-    mostrarToast('Ajuste inteligente aplicado! Use "Desfazer" se necessário.');
-
-    const aulasTurno = aulas.filter(a => a.turno === turno && a.professorId);
-    const mapaConflitos = {};
-    aulasTurno.forEach(a => {
-        const key = `${a.professorId}_${a.dia}_${a.tempoId}`;
-        if (!mapaConflitos[key]) mapaConflitos[key] = [];
-        mapaConflitos[key].push(a);
-    });
-    const conflitosExistentes = [];
-    Object.keys(mapaConflitos).forEach(key => {
-        const grupo = mapaConflitos[key];
-        if (!grupo || grupo.length < 2) return;
-        const turmasIds = Array.from(new Set(grupo.map(g => g.turmaId).filter(Boolean)));
-        if (turmasIds.length < 2) return;
-        const [profId, dia, tempoIdStr] = key.split('_');
-        const tempoId = parseInt(tempoIdStr, 10);
-        const prof = professores.find(p => p.id === profId);
-        const tempo = getTempos(turno).find(t => t.id === tempoId);
-        const nomesTurmas = turmasIds
-            .map(id => {
-                const t = turmas.find(tx => tx.id === id);
-                return t ? t.nome : '';
-            })
-            .filter(Boolean);
-        conflitosExistentes.push({
-            profNome: prof ? prof.nome : profId,
-            dia,
-            tempoEtiqueta: tempo ? tempo.etiqueta : String(tempoId),
-            turmas: nomesTurmas
-        });
-    });
-    if (conflitosExistentes.length > 0) {
-        let msg = 'O ajuste inteligente foi aplicado.\n\n';
-        msg += 'Foram encontrados conflitos de professor já existentes (autorizados anteriormente):\n\n';
-        conflitosExistentes.forEach(c => {
-            msg += `- ${c.profNome}: ${textoDia(c.dia)} / ${textoTurno(turno)} / ${c.tempoEtiqueta} (turmas: ${c.turmas.join(', ')})\n`;
-        });
-        msg += '\nEsses conflitos foram mantidos porque já tinham sido lançados com confirmação do usuário.\n\n';
-        msg += 'O ajuste inteligente apenas compacta os horários dentro do turno selecionado, evitando criar novos conflitos ou colocar o professor em tempos em que está indisponível.';
-        alert(msg);
-    }
+    mostrarToast(
+        `Ajuste inteligente aplicado com sucesso: ${melhorQualidade}% dos grupos de aulas estão bem alocados (${melhorInfo.totalOk} de ${melhorInfo.totalAvaliado}). Use "Desfazer" se necessário.`
+    );
 }
 
 function desfazerAjuste() {
@@ -3160,6 +4694,11 @@ function desfazerAjuste() {
         try {
             const entry = JSON.parse(pilhaUndo[idx]);
             if (entry && entry.turno === turno) {
+                const aulasAtuaisTurno = aulas.filter(a => a.turno === turno);
+                pilhaRedo.push(JSON.stringify({ turno, aulas: aulasAtuaisTurno }));
+                if (pilhaRedo.length > 20) {
+                    pilhaRedo.shift();
+                }
                 pilhaUndo.splice(idx, 1);
                 aulas = aulas.filter(a => a.turno !== turno);
                 if (Array.isArray(entry.aulas)) {
@@ -3169,6 +4708,7 @@ function desfazerAjuste() {
                 montarGradeTurno(turnoAtualGrade);
                 mostrarToast('Ação desfeita com sucesso neste turno.');
                 atualizarIndicadorDesfazerTurno();
+                atualizarIndicadorRefazerTurno();
                 return;
             }
         } catch (e) {
@@ -3176,6 +4716,41 @@ function desfazerAjuste() {
         idx--;
     }
     mostrarToast('Não há ação anterior registrada para este turno.', 'warning');
+}
+
+function refazerAjuste() {
+    const turno = turnoAtualGrade;
+    if (!pilhaRedo.length) {
+        mostrarToast('Não há ação para refazer neste turno.', 'warning');
+        return;
+    }
+    let idx = pilhaRedo.length - 1;
+    while (idx >= 0) {
+        try {
+            const entry = JSON.parse(pilhaRedo[idx]);
+            if (entry && entry.turno === turno) {
+                const aulasAtuaisTurno = aulas.filter(a => a.turno === turno);
+                pilhaUndo.push(JSON.stringify({ turno, aulas: aulasAtuaisTurno }));
+                if (pilhaUndo.length > 20) {
+                    pilhaUndo.shift();
+                }
+                pilhaRedo.splice(idx, 1);
+                aulas = aulas.filter(a => a.turno !== turno);
+                if (Array.isArray(entry.aulas)) {
+                    entry.aulas.forEach(a => aulas.push(a));
+                }
+                salvarLocal();
+                montarGradeTurno(turnoAtualGrade);
+                mostrarToast('Ação refeita com sucesso neste turno.');
+                atualizarIndicadorDesfazerTurno();
+                atualizarIndicadorRefazerTurno();
+                return;
+            }
+        } catch (e) {
+        }
+        idx--;
+    }
+    mostrarToast('Não há ação para refazer neste turno.', 'warning');
 }
 
 // =======================
@@ -3358,6 +4933,7 @@ function salvarTemposTurnoModal() {
     mostrarToast('Tempos do turno salvos.');
     atualizarChipsTempos();
     montarGradeTurno(turnoAtualGrade);
+    renderTemposTurno();
 }
 
 function abrirModalTempos() {
@@ -3389,6 +4965,43 @@ document.addEventListener('DOMContentLoaded', () => {
             renderTemposDisponibilidade('modalDispTemposProfessor', disp, null);
         });
     }
+
+    const campoDiscProf = document.getElementById('disciplinasProfessor');
+    const campoApelidoProf = document.getElementById('apelidoProfessorDisciplina');
+    if (campoDiscProf && campoApelidoProf) {
+        campoDiscProf.addEventListener('input', () => {
+            const texto = campoDiscProf.value || '';
+            const primeira = texto.split(',')[0].trim();
+            if (primeira.length > 10 && !campoApelidoProf.dataset.manual) {
+                const sugestao = sugerirApelidoDisciplina(primeira);
+                if (sugestao) {
+                    campoApelidoProf.value = sugestao;
+                }
+            }
+        });
+        campoApelidoProf.addEventListener('input', () => {
+            campoApelidoProf.dataset.manual = '1';
+        });
+    }
+
+    const modalDisc = document.getElementById('modalDisciplina');
+    const modalApelido = document.getElementById('modalApelidoDisciplina');
+    if (modalDisc && modalApelido) {
+        modalDisc.addEventListener('input', () => {
+            const nome = modalDisc.value.trim();
+            if (nome.length > 10 && !modalApelido.dataset.manual) {
+                const sugestao = sugerirApelidoDisciplina(nome);
+                if (sugestao) {
+                    modalApelido.value = sugestao;
+                }
+            } else if (!nome && !modalApelido.dataset.manual) {
+                modalApelido.value = '';
+            }
+        });
+        modalApelido.addEventListener('input', () => {
+            modalApelido.dataset.manual = '1';
+        });
+    }
 });
 function gerarRelatorioTurnoPDF() {
     const { jsPDF } = window.jspdf;
@@ -3397,7 +5010,20 @@ function gerarRelatorioTurnoPDF() {
     const chkOmitirSabado = document.getElementById('omitirSabadoRelatorios');
     const omitirSabado = !!(chkOmitirSabado && chkOmitirSabado.checked);
 
-    const turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
+    let turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
+    const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+    if (Array.isArray(ordemSalva) && ordemSalva.length) {
+        const mapaPos = new Map();
+        ordemSalva.forEach((id, idx) => {
+            if (!mapaPos.has(id)) mapaPos.set(id, idx);
+        });
+        turmasTurno.sort((a, b) => {
+            const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+            if (ia !== ib) return ia - ib;
+            return 0;
+        });
+    }
     if (!turmasTurno.length) {
         mostrarToast('Não há turmas neste turno.', 'warning');
         return;
@@ -3414,22 +5040,19 @@ function gerarRelatorioTurnoPDF() {
 
     const head = [['DIA', 'HORÁRIO', ...turmasTurno.map(t => t.nome)]];
     const body = [];
+    const diasUsados = DIAS_SEMANA.filter(d => !(omitirSabado && d === 'SABADO'));
 
-    DIAS_SEMANA.forEach(dia => {
-        if (omitirSabado && dia === 'SABADO') return;
+    diasUsados.forEach((dia, idxDia) => {
         const temposTurno = getTempos(turno);
         temposTurno.forEach((tempo, idx) => {
             const row = [];
-            
-            // Coluna DIA com RowSpan para evitar repetição
             if (idx === 0) {
-                row.push({ 
-                    content: textoDia(dia), 
+                row.push({
+                    content: textoDia(dia),
                     rowSpan: temposTurno.length,
-                    styles: { valign: 'middle', halign: 'center' } 
+                    styles: { valign: 'middle', halign: 'center' }
                 });
             }
-            
             row.push(`${tempo.inicio} - ${tempo.fim}`);
 
             if (tempo.intervalo) {
@@ -3463,6 +5086,19 @@ function gerarRelatorioTurnoPDF() {
 
             body.push(row);
         });
+
+        if (idxDia < diasUsados.length - 1) {
+            body.push([{
+                content: '',
+                colSpan: colCount,
+                styles: {
+                    fillColor: [60, 60, 60],
+                    textColor: 255,
+                    cellPadding: 0,
+                    minCellHeight: 1
+                }
+            }]);
+        }
     });
 
     const bodyFont = colCount > 12 ? 8 : 7;
@@ -3564,13 +5200,26 @@ function gerarRelatorioTurnoXLS() {
 
     const turno = document.getElementById('turnoRelatorio').value;
     const layout = document.getElementById('layoutRelatorio').value;
-    const turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
+    let turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
+    const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+    if (Array.isArray(ordemSalva) && ordemSalva.length) {
+        const mapaPos = new Map();
+        ordemSalva.forEach((id, idx) => {
+            if (!mapaPos.has(id)) mapaPos.set(id, idx);
+        });
+        turmasTurno.sort((a, b) => {
+            const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+            if (ia !== ib) return ia - ib;
+            return 0;
+        });
+    }
     if (!turmasTurno.length) {
         mostrarToast('Não há turmas neste turno.', 'warning');
         return;
     }
 
-    const chkOmitirSabado = document.getElementById('omitirSabadoRelatorioCurso');
+    const chkOmitirSabado = document.getElementById('omitirSabadoRelatorios');
     const omitirSabado = !!(chkOmitirSabado && chkOmitirSabado.checked);
 
     const sheetData = [];
@@ -3613,14 +5262,17 @@ function gerarRelatorioTurnoXLS() {
     
     const rowsPerDia = getTempos(turno).length;
     const merges = [];
-    DIAS_SEMANA.forEach((d, idxDia) => {
-        const r0 = 1 + idxDia * rowsPerDia;
+    let idxDiaPlanilha = 0;
+    DIAS_SEMANA.forEach((d) => {
+        if (omitirSabado && d === 'SABADO') return;
+        const r0 = 1 + idxDiaPlanilha * rowsPerDia;
         const r1 = r0 + rowsPerDia - 1;
         merges.push({ s: { r: r0, c: 0 }, e: { r: r1, c: 0 } });
         const addr = XLSX.utils.encode_cell({ r: r0, c: 0 });
         if (ws[addr]) {
             ws[addr].s = Object.assign({}, ws[addr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
         }
+        idxDiaPlanilha++;
     });
     ws['!merges'] = merges;
     const headDiaAddr = XLSX.utils.encode_cell({ r: 0, c: 0 });
@@ -3638,29 +5290,52 @@ function gerarRelatorioTurnoXLS() {
             const s = (n) => n.toString(16).padStart(2, '0').toUpperCase();
             return 'FF' + s(r) + s(g) + s(b);
         };
-    DIAS_SEMANA.forEach((dia, idxDia) => {
-        const temposTurno2 = getTempos(turno);
-        temposTurno2.forEach((tempo, idxTempo) => {
-            if (tempo.intervalo) return;
-            turmasTurno.forEach((turma, idxTurma) => {
-                const aula = obterAula(turno, dia, turma.id, tempo.id);
-                if (!aula) return;
-                const prof = professores.find(p => p.id === aula.professorId);
-                if (!prof || !prof.cor) return;
-                const r = 1 + idxDia * rowsPerDia + idxTempo;
-                const c = 2 + idxTurma;
-                const addr = XLSX.utils.encode_cell({ r, c });
-                if (ws[addr]) {
-                    ws[addr].s = Object.assign({}, ws[addr].s || {}, {
-                        fill: { fgColor: { rgb: toArgb(prof.cor).slice(2) } },
-                        font: { color: { rgb: 'FFFFFFFF' } },
-                        alignment: { horizontal: 'center', vertical: 'center' }
-                    });
-                }
+        let idxDiaPlanilha2 = 0;
+        DIAS_SEMANA.forEach((dia) => {
+            if (omitirSabado && dia === 'SABADO') return;
+            const temposTurno2 = getTempos(turno);
+            temposTurno2.forEach((tempo, idxTempo) => {
+                if (tempo.intervalo) return;
+                turmasTurno.forEach((turma, idxTurma) => {
+                    const aula = obterAula(turno, dia, turma.id, tempo.id);
+                    if (!aula) return;
+                    const prof = professores.find(p => p.id === aula.professorId);
+                    if (!prof || !prof.cor) return;
+                    const r = 1 + idxDiaPlanilha2 * rowsPerDia + idxTempo;
+                    const c = 2 + idxTurma;
+                    const addr = XLSX.utils.encode_cell({ r, c });
+                    if (ws[addr]) {
+                        ws[addr].s = Object.assign({}, ws[addr].s || {}, {
+                            fill: { patternType: 'solid', fgColor: { rgb: toArgb(prof.cor) } },
+                            font: { color: { rgb: 'FFFFFFFF' } },
+                            alignment: { horizontal: 'center', vertical: 'center' }
+                        });
+                    }
+                });
             });
+            idxDiaPlanilha2++;
         });
-    });
     }
+
+    const totalCols = 2 + turmasTurno.length;
+    let idxDiaBorda = 0;
+    DIAS_SEMANA.forEach((d) => {
+        if (omitirSabado && d === 'SABADO') return;
+        const r1 = 1 + idxDiaBorda * rowsPerDia + rowsPerDia - 1;
+        for (let c = 0; c < totalCols; c++) {
+            const addr = XLSX.utils.encode_cell({ r: r1, c });
+            if (ws[addr]) {
+                const prev = ws[addr].s || {};
+                const prevBorder = prev.border || {};
+                ws[addr].s = Object.assign({}, prev, {
+                    border: Object.assign({}, prevBorder, {
+                        bottom: { style: 'medium', color: { rgb: 'FF000000' } }
+                    })
+                });
+            }
+        }
+        idxDiaBorda++;
+    });
     
     XLSX.utils.book_append_sheet(wb, ws, 'Turno');
     XLSX.writeFile(wb, `horario_turno_${turno.toLowerCase()}_${new Date().toISOString().slice(0,10)}.xlsx`);
@@ -3682,9 +5357,23 @@ function gerarRelatorioCursoPDF() {
         return;
     }
 
-    const turmasSelecionadas = turmas
+    let turmasSelecionadas = turmas
         .filter(t => t.turno === turno && cursosSelecionados.includes(t.curso))
         .sort(compararTurmasPorCursoETipo);
+
+    const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+    if (Array.isArray(ordemSalva) && ordemSalva.length) {
+        const mapaPos = new Map();
+        ordemSalva.forEach((id, idx) => {
+            if (!mapaPos.has(id)) mapaPos.set(id, idx);
+        });
+        turmasSelecionadas.sort((a, b) => {
+            const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+            if (ia !== ib) return ia - ib;
+            return 0;
+        });
+    }
 
     if (!turmasSelecionadas.length) {
         mostrarToast('Não há turmas nos cursos/turno selecionados.', 'warning');
@@ -3703,12 +5392,11 @@ function gerarRelatorioCursoPDF() {
 
     const head = [['DIA', 'HORÁRIO', ...turmasSelecionadas.map(t => t.nome)]];
     const body = [];
-
     const chkOmitirSabado = document.getElementById('omitirSabadoRelatorioCurso');
     const omitirSabado = !!(chkOmitirSabado && chkOmitirSabado.checked);
+    const diasUsados = DIAS_SEMANA.filter(d => !(omitirSabado && d === 'SABADO'));
 
-    DIAS_SEMANA.forEach(dia => {
-        if (omitirSabado && dia === 'SABADO') return;
+    diasUsados.forEach((dia, idxDia) => {
         const temposTurno = getTempos(turno);
         temposTurno.forEach((tempo, idx) => {
             const row = [];
@@ -3750,6 +5438,19 @@ function gerarRelatorioCursoPDF() {
             }
             body.push(row);
         });
+
+        if (idxDia < diasUsados.length - 1) {
+            body.push([{
+                content: '',
+                colSpan: colCount,
+                styles: {
+                    fillColor: [60, 60, 60],
+                    textColor: 255,
+                    cellPadding: 0,
+                    minCellHeight: 1
+                }
+            }]);
+        }
     });
 
     const bodyFont = colCount > 12 ? 8 : 7;
@@ -3830,7 +5531,20 @@ function gerarRelatorioCursoXLS() {
     const wb = XLSX.utils.book_new();
 
     cursosSelecionados.forEach(curso => {
-        const turmasCurso = turmas.filter(t => t.curso === curso && t.turno === turno);
+        let turmasCurso = turmas.filter(t => t.curso === curso && t.turno === turno);
+        const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+        if (Array.isArray(ordemSalva) && ordemSalva.length) {
+            const mapaPos = new Map();
+            ordemSalva.forEach((id, idx) => {
+                if (!mapaPos.has(id)) mapaPos.set(id, idx);
+            });
+            turmasCurso.sort((a, b) => {
+                const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+                const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+                if (ia !== ib) return ia - ib;
+                return 0;
+            });
+        }
         if (!turmasCurso.length) {
             return;
         }
@@ -3909,7 +5623,7 @@ function gerarRelatorioCursoXLS() {
                         const addr = XLSX.utils.encode_cell({ r, c });
                         if (ws[addr]) {
                             ws[addr].s = Object.assign({}, ws[addr].s || {}, {
-                                fill: { fgColor: { rgb: toArgb(prof.cor).slice(2) } },
+                                fill: { patternType: 'solid', fgColor: { rgb: toArgb(prof.cor) } },
                                 font: { color: { rgb: 'FFFFFFFF' } },
                                 alignment: { horizontal: 'center', vertical: 'center' }
                             });
@@ -3918,6 +5632,23 @@ function gerarRelatorioCursoXLS() {
                 });
             });
         }
+
+        const totalCols = 2 + turmasCurso.length;
+        DIAS_SEMANA.forEach((d, idxDia) => {
+            const r1 = 1 + idxDia * rowsPerDia + rowsPerDia - 1;
+            for (let c = 0; c < totalCols; c++) {
+                const addr = XLSX.utils.encode_cell({ r: r1, c });
+                if (ws[addr]) {
+                    const prev = ws[addr].s || {};
+                    const prevBorder = prev.border || {};
+                    ws[addr].s = Object.assign({}, prev, {
+                        border: Object.assign({}, prevBorder, {
+                            bottom: { style: 'medium', color: { rgb: 'FF000000' } }
+                        })
+                    });
+                }
+            }
+        });
 
         XLSX.utils.book_append_sheet(wb, ws, curso.substring(0, 25));
     });
@@ -4340,6 +6071,9 @@ function preverImpressaoConsulta() {
         else if (tipo === 'turmas') descTipo = 'Turmas';
         else if (tipo === 'turnos') descTipo = 'Turnos';
         else if (tipo === 'cursos') descTipo = 'Cursos / Áreas';
+        else if (tipo === 'disponibilidadeProfessores') descTipo = 'Tempos disponíveis dos Professores';
+        else if (tipo === 'disponibilidadeProfessoresInformada') descTipo = 'Disponibilidade dos Professores Informada';
+        else if (tipo === 'tempoProfessoresSala') descTipo = 'Tempo dos Professores em Sala';
         tituloResultadoEl.textContent = descTipo ? `Resultado - ${descTipo}` : 'Resultado';
     }
     document.body.classList.add('print-consultas');
@@ -4360,20 +6094,24 @@ function onChangeTipoConsulta() {
     const grupoTurma = document.getElementById('filtroTurmaGroup');
     const grupoTurno = document.getElementById('filtroTurnoGroup');
     const grupoCurso = document.getElementById('filtroCursoGroup');
+    const grupoOpcoes = document.getElementById('filtroOpcoesConsultaGroup');
     if (grupoBase) {
-        grupoBase.style.display = (tipo === 'professores' || tipo === 'disponibilidadeProfessores') ? '' : 'none';
+        grupoBase.style.display = (tipo === 'professores' || tipo === 'disponibilidadeProfessores' || tipo === 'disponibilidadeProfessoresInformada' || tipo === 'tempoProfessoresSala') ? '' : 'none';
     }
-    if (tipo !== 'professores' && selBase) {
+    if (tipo !== 'professores' && tipo !== 'disponibilidadeProfessores' && tipo !== 'disponibilidadeProfessoresInformada' && tipo !== 'tempoProfessoresSala' && selBase) {
         selBase.value = '';
     }
     if (grupoTurma) {
         grupoTurma.style.display = tipo === 'turmas' ? '' : 'none';
     }
     if (grupoTurno) {
-        grupoTurno.style.display = (tipo === 'turnos' || tipo === 'disponibilidadeProfessores') ? '' : 'none';
+        grupoTurno.style.display = (tipo === 'turnos' || tipo === 'disponibilidadeProfessores' || tipo === 'disponibilidadeProfessoresInformada' || tipo === 'tempoProfessoresSala') ? '' : 'none';
     }
     if (grupoCurso) {
         grupoCurso.style.display = tipo === 'cursos' ? '' : 'none';
+    }
+    if (grupoOpcoes) {
+        grupoOpcoes.style.display = tipo === 'professores' ? '' : 'none';
     }
 }
 
@@ -5287,9 +7025,22 @@ function gerarConsulta() {
     const filtroCurso = document.getElementById('filtroCursoConsulta')?.value || '';
     const thead = document.querySelector('#tabelaConsulta thead');
     const tbody = document.querySelector('#tabelaConsulta tbody');
+    const tituloResultadoEl = document.getElementById('tituloResultadoConsulta');
     if (!thead || !tbody) return;
     thead.innerHTML = '';
     tbody.innerHTML = '';
+
+    if (tituloResultadoEl) {
+        let descTipo = '';
+        if (tipo === 'professores') descTipo = 'Professores';
+        else if (tipo === 'turmas') descTipo = 'Turmas';
+        else if (tipo === 'turnos') descTipo = 'Turnos';
+        else if (tipo === 'cursos') descTipo = 'Cursos / Áreas';
+        else if (tipo === 'disponibilidadeProfessores') descTipo = 'Tempos disponíveis dos Professores';
+        else if (tipo === 'disponibilidadeProfessoresInformada') descTipo = 'Disponibilidade dos Professores Informada';
+        else if (tipo === 'tempoProfessoresSala') descTipo = 'Tempo dos Professores em Sala';
+        tituloResultadoEl.textContent = descTipo ? `Resultado - ${descTipo}` : 'Resultado';
+    }
 
     if (tipo === 'professores') {
         thead.innerHTML = `
@@ -5300,7 +7051,7 @@ function gerarConsulta() {
                 <th>Total de Aulas</th>
                 <th>Turnos Atuantes</th>
                 <th>CH mensal (h)</th>
-                <th>CH em janelas (h/mês)</th>
+                <th class="col-ch-janelas">CH em janelas (h/mês)</th>
                 <th>Dias atuantes</th>
                 <th>Dias disponíveis</th>
                 <th>Nº turmas</th>
@@ -5363,7 +7114,7 @@ function gerarConsulta() {
                 <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${aulasProfessor.length}</span></td>
                 <td>${turnos.map(t => textoTurno(t)).join(', ') || '-'}</td>
                 <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${carga.horasMes}</span></td>
-                <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${temposVagos.vagosMes}</span></td>
+                <td class="col-ch-janelas"><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${temposVagos.vagosMes}</span></td>
                 <td>${diasAtuantes}</td>
                 <td>${diasDisponiveis}</td>
                 <td>${turmasAtuantes}</td>
@@ -5371,15 +7122,32 @@ function gerarConsulta() {
             `;
             tbody.appendChild(tr);
         });
+
+        const ocultarCH = document.getElementById('ocultarCHJanelasConsulta')?.checked;
+        const tabela = document.getElementById('tabelaConsulta');
+        if (tabela) {
+            const display = ocultarCH ? 'none' : '';
+            tabela.querySelectorAll('.col-ch-janelas').forEach(el => {
+                el.style.display = display;
+            });
+        }
     } 
     else if (tipo === 'disponibilidadeProfessores') {
+        const diasTabela = ['SEGUNDA','TERCA','QUARTA','QUINTA','SEXTA'];
+        const turnosTabela = ['MANHA','TARDE','NOITE'];
+
         thead.innerHTML = `
             <tr>
-                <th>Professor</th>
-                <th>Base</th>
-                <th>Turno</th>
-                <th>Dia</th>
-                <th>Horários disponíveis</th>
+                <th rowspan="2">Nº</th>
+                <th rowspan="2">Professor(a)</th>
+                ${diasTabela.map(d => `<th colspan="${turnosTabela.length}">${textoDia(d)}</th>`).join('')}
+            </tr>
+            <tr>
+                ${diasTabela.map(() => `
+                    <th>Manhã</th>
+                    <th>Tarde</th>
+                    <th>Noite</th>
+                `).join('')}
             </tr>
         `;
 
@@ -5390,21 +7158,29 @@ function gerarConsulta() {
             (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })
         );
 
+        let indice = 1;
+
         ordenados.forEach(p => {
             const baseTipo = p.baseTipo || 'TECNICA';
             if (filtroBaseEfetivo && baseTipo !== filtroBaseEfetivo) {
                 return;
             }
-            const dispDia = p.disponibilidadePorDia || {};
-            DIAS_SEMANA.forEach(dia => {
-                const listaTurnosDia = Array.isArray(dispDia[dia]) ? dispDia[dia] : [];
-                if (!listaTurnosDia.length) {
-                    return;
-                }
-                const turnosParaDia = listaTurnosDia.filter(t => !filtroTurnoEfetivo || t === filtroTurnoEfetivo);
-                turnosParaDia.forEach(turno => {
+
+            let temAlguma = false;
+            let cellsHtml = '';
+
+            diasTabela.forEach(dia => {
+                turnosTabela.forEach(turno => {
+                    if (filtroTurnoEfetivo && turno !== filtroTurnoEfetivo) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
                     const temposTurno = getTempos(turno).filter(t => !t.intervalo);
-                    if (!temposTurno.length) return;
+                    if (!temposTurno.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
 
                     const temposDisponiveis = temposTurno.filter(t => {
                         if (!professorDisponivelNoHorario(p, turno, dia, t.id)) return false;
@@ -5418,25 +7194,251 @@ function gerarConsulta() {
                         return true;
                     });
 
-                    if (!temposDisponiveis.length) return;
+                    if (!temposDisponiveis.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
 
-                    const labelTurno = textoTurno(turno);
-                    const labelDia = textoDia(dia);
-                    const descTempos = temposDisponiveis
-                        .map(t => etiquetaTempoAbrev(t, turno))
-                        .join(', ');
+                    temAlguma = true;
 
-                    const tr = document.createElement('tr');
-                    tr.innerHTML = `
-                        <td><strong>${p.nome}</strong></td>
-                        <td>${baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica'}</td>
-                        <td>${labelTurno}</td>
-                        <td>${labelDia}</td>
-                        <td>${descTempos}</td>
-                    `;
-                    tbody.appendChild(tr);
+                    const ordenadosTempos = temposDisponiveis
+                        .slice()
+                        .sort((t1, t2) => t1.id - t2.id);
+
+                    const primeiro = ordenadosTempos[0];
+                    const ultimo = ordenadosTempos[ordenadosTempos.length - 1];
+
+                    let descTempos = '';
+                    if (primeiro.id === ultimo.id) {
+                        descTempos = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                    } else {
+                        const inicioTexto = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                        const fimTexto = (ultimo.etiqueta || '').replace(' Tempo', '').trim();
+                        descTempos = `${inicioTexto} ao ${fimTexto}`;
+                    }
+
+                    cellsHtml += `<td>${descTempos}</td>`;
                 });
             });
+
+            if (!temAlguma) return;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${indice}</td>
+                <td><strong>${p.nome}</strong></td>
+                ${cellsHtml}
+            `;
+            tbody.appendChild(tr);
+            indice++;
+        });
+    }
+    else if (tipo === 'disponibilidadeProfessoresInformada') {
+        const diasTabela = ['SEGUNDA','TERCA','QUARTA','QUINTA','SEXTA'];
+        const turnosTabela = ['MANHA','TARDE','NOITE'];
+
+        thead.innerHTML = `
+            <tr>
+                <th rowspan="2">Nº</th>
+                <th rowspan="2">Professor(a)</th>
+                ${diasTabela.map(d => `<th colspan="${turnosTabela.length}">${textoDia(d)}</th>`).join('')}
+            </tr>
+            <tr>
+                ${diasTabela.map(() => `
+                    <th>Manhã</th>
+                    <th>Tarde</th>
+                    <th>Noite</th>
+                `).join('')}
+            </tr>
+        `;
+
+        const filtroBaseEfetivo = filtroBase || '';
+        const filtroTurnoEfetivo = filtroTurno || '';
+
+        const ordenados = [...professores].sort((a, b) =>
+            (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })
+        );
+
+        let indice = 1;
+
+        ordenados.forEach(p => {
+            const baseTipo = p.baseTipo || 'TECNICA';
+            if (filtroBaseEfetivo && baseTipo !== filtroBaseEfetivo) {
+                return;
+            }
+
+            const dispDia = p.disponibilidadePorDia || {};
+            const temposMap = p.temposPorDiaTurno || null;
+
+            let temAlguma = false;
+            let cellsHtml = '';
+
+            diasTabela.forEach(dia => {
+                const listaTurnosDia = Array.isArray(dispDia[dia]) ? dispDia[dia] : [];
+
+                turnosTabela.forEach(turno => {
+                    if (filtroTurnoEfetivo && turno !== filtroTurnoEfetivo) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    if (!listaTurnosDia.includes(turno)) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    let ids = [];
+                    if (temposMap && temposMap[dia] && Array.isArray(temposMap[dia][turno]) && temposMap[dia][turno].length) {
+                        ids = temposMap[dia][turno];
+                    } else {
+                        ids = getTempos(turno).filter(t => !t.intervalo).map(t => t.id);
+                    }
+
+                    if (!ids.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+                    const usados = temposTurno.filter(tp => ids.includes(tp.id));
+
+                    if (!usados.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    temAlguma = true;
+
+                    const ordenadosTempos = usados
+                        .slice()
+                        .sort((t1, t2) => t1.id - t2.id);
+
+                    const primeiro = ordenadosTempos[0];
+                    const ultimo = ordenadosTempos[ordenadosTempos.length - 1];
+
+                    let descTempos = '';
+                    if (primeiro.id === ultimo.id) {
+                        descTempos = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                    } else {
+                        const inicioTexto = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                        const fimTexto = (ultimo.etiqueta || '').replace(' Tempo', '').trim();
+                        descTempos = `${inicioTexto} ao ${fimTexto}`;
+                    }
+
+                    cellsHtml += `<td>${descTempos}</td>`;
+                });
+            });
+
+            if (!temAlguma) return;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${indice}</td>
+                <td><strong>${p.nome}</strong></td>
+                ${cellsHtml}
+            `;
+            tbody.appendChild(tr);
+            indice++;
+        });
+    }
+    else if (tipo === 'tempoProfessoresSala') {
+        const diasTabela = ['SEGUNDA','TERCA','QUARTA','QUINTA','SEXTA'];
+        const turnosTabela = ['MANHA','TARDE','NOITE'];
+
+        thead.innerHTML = `
+            <tr>
+                <th rowspan="2">Nº</th>
+                <th rowspan="2">Professor(a)</th>
+                ${diasTabela.map(d => `<th colspan="${turnosTabela.length}">${textoDia(d)}</th>`).join('')}
+            </tr>
+            <tr>
+                ${diasTabela.map(() => `
+                    <th>Manhã</th>
+                    <th>Tarde</th>
+                    <th>Noite</th>
+                `).join('')}
+            </tr>
+        `;
+
+        const filtroBaseEfetivo = filtroBase || '';
+        const filtroTurnoEfetivo = filtroTurno || '';
+
+        const ordenados = [...professores].sort((a, b) =>
+            (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' })
+        );
+
+        let indice = 1;
+
+        ordenados.forEach(p => {
+            const baseTipo = p.baseTipo || 'TECNICA';
+            if (filtroBaseEfetivo && baseTipo !== filtroBaseEfetivo) {
+                return;
+            }
+
+            const aulasProfessor = aulas.filter(a => a.professorId === p.id);
+
+            let temAlguma = false;
+            let cellsHtml = '';
+
+            diasTabela.forEach(dia => {
+                turnosTabela.forEach(turno => {
+                    if (filtroTurnoEfetivo && turno !== filtroTurnoEfetivo) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    const aulasDiaTurno = aulasProfessor.filter(a => a.dia === dia && a.turno === turno);
+                    if (!aulasDiaTurno.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    const ids = Array.from(new Set(aulasDiaTurno.map(a => a.tempoId).filter(id => id !== null && id !== undefined))).sort((a, b) => a - b);
+                    if (!ids.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+                    const usados = temposTurno.filter(tp => ids.includes(tp.id));
+
+                    if (!usados.length) {
+                        cellsHtml += '<td></td>';
+                        return;
+                    }
+
+                    temAlguma = true;
+
+                    const ordenadosTempos = usados
+                        .slice()
+                        .sort((t1, t2) => t1.id - t2.id);
+
+                    const primeiro = ordenadosTempos[0];
+                    const ultimo = ordenadosTempos[ordenadosTempos.length - 1];
+
+                    let descTempos = '';
+                    if (primeiro.id === ultimo.id) {
+                        descTempos = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                    } else {
+                        const inicioTexto = (primeiro.etiqueta || '').replace(' Tempo', '').trim();
+                        const fimTexto = (ultimo.etiqueta || '').replace(' Tempo', '').trim();
+                        descTempos = `${inicioTexto} ao ${fimTexto}`;
+                    }
+
+                    cellsHtml += `<td>${descTempos}</td>`;
+                });
+            });
+
+            if (!temAlguma) return;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td>${indice}</td>
+                <td><strong>${p.nome}</strong></td>
+                ${cellsHtml}
+            `;
+            tbody.appendChild(tr);
+            indice++;
         });
     }
     else if (tipo === 'turmas') {
@@ -5659,8 +7661,9 @@ function exportarBackup() {
         turmas,
         aulas,
         cursos,
+        temposPorTurno: TEMPOS_POR_TURNO,
         exportadoEm: new Date().toISOString(),
-        versao: '1.0'
+        versao: '1.1'
     };
     
     const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
@@ -5700,6 +7703,12 @@ function importarBackup(event) {
             turmas = dados.turmas;
             aulas = dados.aulas;
             cursos = dados.cursos || cursos;
+            if (!cursos.includes(CURSO_TEMPO_INTEGRAL)) {
+                cursos.push(CURSO_TEMPO_INTEGRAL);
+            }
+            if (dados.temposPorTurno) {
+                TEMPOS_POR_TURNO = dados.temposPorTurno;
+            }
             
             salvarLocal();
             location.reload();
@@ -5775,6 +7784,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const formTurma = document.getElementById('formTurma');
     if (formTurma) formTurma.addEventListener('submit', salvarTurma);
+
+    const selCursoTurma = document.getElementById('cursoTurma');
+    if (selCursoTurma) {
+        selCursoTurma.addEventListener('change', () => {
+            const hiddenTurno = document.getElementById('turnoTurma');
+            if (hiddenTurno) hiddenTurno.value = '';
+            const chips = document.querySelectorAll('#chips-turno-turma .chip');
+            chips.forEach(c => c.classList.remove('selecionado'));
+        });
+    }
 
     const formHorario = document.getElementById('formHorario');
     if (formHorario) formHorario.addEventListener('submit', salvarHorario);
