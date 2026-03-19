@@ -1,0 +1,6 @@
+VisioHorário
+
+
+- https://github.com/VisioHorario → painel da conta no GitHub.
+- https://visiohorario.github.io/ → site/aplicação aberta para uso no navegador.
+
