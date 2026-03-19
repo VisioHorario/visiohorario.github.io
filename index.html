@@ -96,7 +96,7 @@
             <button class="menu-btn active" onclick="showSection('professores')">👨‍🏫 Professores</button>
             <button class="menu-btn" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
             <button class="menu-btn" onclick="showSection('horarios')">📅 Editor de Horários</button>
-            <button class="menu-btn" onclick="showSection('relatorios')">📄 Relatórios / PDFs</button>
+            <button class="menu-btn" onclick="showSection('relatorios')">📄 Relatórios e Horários</button>
             <button class="menu-btn" onclick="showSection('consultas')">🔎 Consultas</button>
             <button class="menu-btn" onclick="sairSistema()">🚪 Sair</button>
         </nav>
@@ -152,28 +152,38 @@
                 </div>
 
                 <div class="card">
-                    <h3>Atualizar disciplina (opcional)</h3>
-                    <form id="formApelidoDisciplina" class="form-grid">
-                        <div class="form-group">
-                            <label for="disciplinaApelidoSelect">Disciplina:</label>
-                            <select id="disciplinaApelidoSelect">
-                                <option value="">Selecione...</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="apelidoDisciplinaInput">Apelido:</label>
-                            <div class="inline-group">
-                                <input type="text" id="apelidoDisciplinaInput" placeholder="Ex.: PORT, GER. B. DADOS" style="flex:1;">
-                                <label style="display:inline-flex; align-items:center; gap:4px;">
-                                    <input type="checkbox" id="removerApelidoDisciplinaCheckbox" onchange="toggleRemoverApelidoDisciplina(this)">
-                                    Retirar apelido
-                                </label>
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Atualizar disciplina (opcional)</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleAtualizarDisciplina" onclick="toggleAtualizarDisciplina()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="atualizar-disciplina-body hidden" id="atualizarDisciplinaBody">
+                        <form id="formApelidoDisciplina" class="form-grid">
+                            <div class="form-group">
+                                <label for="disciplinaApelidoSelect">Disciplina:</label>
+                                <select id="disciplinaApelidoSelect">
+                                    <option value="">Selecione...</option>
+                                </select>
                             </div>
-                        </div>
-                        <div class="form-group">
-                            <button type="submit" class="btn-primary">💾 Salvar Apelido</button>
-                        </div>
-                    </form>
+                            <div class="form-group">
+                                <label for="apelidoDisciplinaInput">Apelido:</label>
+                                <div class="inline-group">
+                                    <input type="text" id="apelidoDisciplinaInput" placeholder="Ex.: PORT, GER. B. DADOS" style="flex:1;">
+                                    <label style="display:inline-flex; align-items:center; gap:4px;">
+                                        <input type="checkbox" id="removerApelidoDisciplinaCheckbox" onchange="toggleRemoverApelidoDisciplina(this)">
+                                        Retirar apelido
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <button type="submit" class="btn-primary">💾 Salvar Apelido</button>
+                            </div>
+                            <div class="form-group">
+                                <button type="button" class="btn-danger" onclick="excluirDisciplina()">🗑️ Excluir disciplina</button>
+                            </div>
+                        </form>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -280,8 +290,13 @@
                 <h2>Editor Visual de Horários</h2>
 
                 <div class="card">
-                    <h3>Lançar Aula (Cadastro Rápido)</h3>
-                    <form id="formHorario" class="form-grid">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Lançar Aula (Cadastro)</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleCadastroRapido" onclick="toggleCadastroRapido()">
+                            ▼
+                        </button>
+                    </div>
+                    <form id="formHorario" class="form-grid cadastro-rapido-body hidden">
                         <input type="hidden" id="horarioId">
 
                         <div class="form-group">
@@ -357,7 +372,7 @@
                 </div>
 
                 <div class="card">
-                    <h3>Editor Visual</h3>
+                    <h3>Editor Visual (Cadastro Rápido)</h3>
                     <p id="editorTurnoHint" class="hint editor-turno-hint">
                         <label class="editor-hint-toggle">
                             <input type="checkbox" id="chkMostrarInstrucoesEditor">
@@ -365,13 +380,13 @@
                             <span class="editor-hint-label">Instruções</span>
                         </label>
                         <span id="editorTurnoHintText">
-                            Arraste uma aula colorida para outra célula vazia para copiar. Clique nas células para editar ou adicionar. Use 🧠 Ajuste Inteligente e ↩️ Desfazer para reorganizar ou voltar.
+                            Arraste aulas para copiar/mover e clique nas células para editar ou adicionar. Use 🧠 Ajuste Inteligente (com IA opcional), ↩️ Desfazer e ↪️ Refazer para organizar a grade.
                         </span>
                     </p>
 
                     <div class="filtros-grade">
                         <div class="filtros-grade-group">
-                            <span>Modo de visualização:</span>
+                            <span>Visualização:</span>
                             <div class="chips-group" id="chips-modo-visual">
                                 <button type="button" class="chip selecionado" data-value="TURNO"
                                         onclick="mudarModoVisual(this)">Por turno</button>
@@ -380,7 +395,7 @@
                             </div>
                         </div>
                         <div class="filtros-grade-group">
-                            <span>Turno visualizado:</span>
+                            <span>Turno:</span>
                             <div class="chips-group" id="chips-turno-visual">
                                 <button type="button" class="chip selecionado" data-value="MANHA"
                                         onclick="mudarTurnoVisual(this)">Manhã</button>
@@ -402,10 +417,22 @@
                                 Ocultar sábado
                             </label>
                         </div>
+                        <div class="filtros-grade-group">
+                            <label style="display:inline-flex; align-items:center; gap:4px;">
+                                <input type="checkbox" id="chkContrasteAutomaticoTela" onclick="montarGradeTurno(turnoAtualGrade)" checked>
+                                Melhorar contraste das letras
+                            </label>
+                        </div>
+                        <div class="filtros-grade-group">
+                            <label style="display:inline-flex; align-items:center; gap:4px;">
+                                <input type="checkbox" id="chkUsarIaNoAjuste">
+                                Usar IA no Ajuste
+                            </label>
+                        </div>
                     </div>
 
                     <div class="editor-actions">
-                        <button type="button" class="btn-primary" onclick="ajusteInteligente()">🧠 Ajuste Inteligente</button>
+                        <button type="button" class="btn-primary" onclick="executarAjusteInteligente()">🧠 Ajuste Inteligente</button>
                         <button type="button" class="btn-secondary" onclick="verificarConflitosTurno()">🔍 Verificar Conflitos</button>
                         <button type="button" class="btn-secondary" id="btnDesfazerTurno" onclick="desfazerAjuste()">↩️ Desfazer</button>
                         <button type="button" class="btn-secondary" id="btnRefazerTurno" onclick="refazerAjuste()">↪️ Refazer</button>
@@ -481,44 +508,51 @@
                 </div>
 
                 <div class="card">
-                    <h3>Limpeza de Horários (Novo Semestre)</h3>
-                    <div class="form-grid">
-                        <div class="form-group full-row">
-                            <label>Apagar horários da turma:</label>
-                            <select id="turmaLimpeza">
-                                <option value="">Selecione a turma...</option>
-                            </select>
-                            <button type="button" class="btn-warning" onclick="limparAulasTurma()">🗑️ Apagar da turma</button>
-                        </div>
-                        <div class="form-group full-row">
-                            <label>Apagar por dia da semana:</label>
-                            <div class="inline-group">
-                                <select id="diaLimpeza">
-                                    <option value="">Selecione o dia...</option>
-                                    <option value="SEGUNDA">Segunda</option>
-                                    <option value="TERCA">Terça</option>
-                                    <option value="QUARTA">Quarta</option>
-                                    <option value="QUINTA">Quinta</option>
-                                    <option value="SEXTA">Sexta</option>
-                                    <option value="SABADO">Sábado</option>
-                                </select>
-                                <select id="turnoLimpeza">
-                                    <option value="TODOS">Todos os turnos</option>
-                                    <option value="MANHA">Manhã</option>
-                                    <option value="TARDE">Tarde</option>
-                                    <option value="NOITE">Noite</option>
-                                </select>
-                            </div>
-                            <button type="button" class="btn-warning" onclick="limparAulasDiaSemana()">🗑️ Apagar do dia</button>
-                        </div>
-                        <div class="form-group full-row">
-                            <label>Apagar toda a tabela:</label>
-                            <button type="button" class="btn-danger" onclick="limparTodasAulas()">🗑️ Apagar todos os horários</button>
-                        </div>
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Limpeza de Horários (Novo Semestre)</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleLimpezaHorarios" onclick="toggleLimpezaHorarios()">
+                            ▼
+                        </button>
                     </div>
-                    <p class="hint">
-                        Recomenda-se usar o botão <strong>Exportar Backup</strong> acima, antes de apagar horários, para manter um histórico do semestre anterior.
-                    </p>
+                    <div class="limpeza-horarios-body hidden" id="limpezaHorariosBody">
+                        <div class="form-grid">
+                            <div class="form-group full-row">
+                                <label>Apagar horários da turma:</label>
+                                <select id="turmaLimpeza">
+                                    <option value="">Selecione a turma...</option>
+                                </select>
+                                <button type="button" class="btn-warning" onclick="limparAulasTurma()">🗑️ Apagar da turma</button>
+                            </div>
+                            <div class="form-group full-row">
+                                <label>Apagar por dia da semana:</label>
+                                <div class="inline-group">
+                                    <select id="diaLimpeza">
+                                        <option value="">Selecione o dia...</option>
+                                        <option value="SEGUNDA">Segunda</option>
+                                        <option value="TERCA">Terça</option>
+                                        <option value="QUARTA">Quarta</option>
+                                        <option value="QUINTA">Quinta</option>
+                                        <option value="SEXTA">Sexta</option>
+                                        <option value="SABADO">Sábado</option>
+                                    </select>
+                                    <select id="turnoLimpeza">
+                                        <option value="TODOS">Todos os turnos</option>
+                                        <option value="MANHA">Manhã</option>
+                                        <option value="TARDE">Tarde</option>
+                                        <option value="NOITE">Noite</option>
+                                    </select>
+                                </div>
+                                <button type="button" class="btn-warning" onclick="limparAulasDiaSemana()">🗑️ Apagar do dia</button>
+                            </div>
+                            <div class="form-group full-row">
+                                <label>Apagar toda a tabela:</label>
+                                <button type="button" class="btn-danger" onclick="limparTodasAulas()">🗑️ Apagar todos os horários</button>
+                            </div>
+                        </div>
+                        <p class="hint">
+                            Recomenda-se usar o botão <strong>Exportar Backup</strong> acima, antes de apagar horários, para manter um histórico do semestre anterior.
+                        </p>
+                    </div>
                 </div>
 
                 <div class="card">
@@ -600,11 +634,16 @@
 
             <!-- ================= RELATÓRIOS / PDFs ================= -->
             <section id="relatorios" class="section">
-                <h2>Relatórios e PDFs</h2>
+                <h2>Relatórios e Horários em PDFs</h2>
 
                 <div class="card">
-                    <h3>Relatório por Turno</h3>
-                    <div class="form-grid">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Horário por Turno</h3>
+                        <button type="button" class="btn-icon-toggle" id="btnToggleRelatorioTurno" onclick="toggleRelatorioTurno()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="form-grid relatorio-turno-body" id="relatorioTurnoBody">
                         <div class="form-group">
                             <label>Turno:</label>
                             <select id="turnoRelatorio">
@@ -624,6 +663,7 @@
                             <label>Opções:</label>
                             <div class="inline-group">
                                 <label><input type="checkbox" id="omitirSabadoRelatorios"> Omitir sábado</label>
+                                <label><input type="checkbox" id="contrastePdfTurno" checked> Melhorar contraste das letras</label>
                             </div>
                         </div>
                         <div class="form-group full-row">
@@ -636,8 +676,52 @@
                 </div>
 
                 <div class="card">
-                    <h3>Relatório por Curso</h3>
-                    <div class="form-grid">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Horário por Número de Turmas</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleRelatorioNumeroTurmas" onclick="toggleRelatorioNumeroTurmas()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="form-grid relatorio-numero-turmas-body hidden" id="relatorioNumeroTurmasBody">
+                        <div class="form-group">
+                            <label>Turno:</label>
+                            <div class="inline-group">
+                                <select id="turnoRelatorioNumeroTurmas" onchange="atualizarInfoQtdTurmasTurnoNumero()">
+                                    <option value="MANHA">Manhã</option>
+                                    <option value="TARDE">Tarde</option>
+                                    <option value="NOITE">Noite</option>
+                                </select>
+                                <span id="infoQtdTurmasTurnoNumero" style="font-size:0.85em;font-style:italic;margin-left:6px;"></span>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>Quantidade de turmas por página:</label>
+                            <input type="number" id="qtdTurmasRelatorio" min="1" max="20" value="7">
+                            <span class="hint">Sugestão: até 7 turmas cabe bem em uma folha A4.</span>
+                        </div>
+                        <div class="form-group">
+                            <label>Opções:</label>
+                            <div class="inline-group">
+                                <label><input type="checkbox" id="omitirSabadoRelatoriosQtdTurmas"> Omitir sábado</label>
+                                <label><input type="checkbox" id="contrastePdfNumeroTurmas" checked> Melhorar contraste das letras</label>
+                            </div>
+                        </div>
+                        <div class="form-group full-row">
+                            <div class="inline-group">
+                                <button class="btn-pdf" type="button" onclick="gerarRelatorioTurnoNumeroTurmasPDF()">📄 Gerar PDF por Número de Turmas</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Horário por Curso</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleRelatorioCurso" onclick="toggleRelatorioCurso()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="form-grid relatorio-curso-body hidden" id="relatorioCursoBody">
                         <div class="form-group">
                             <label>Curso / Área:</label>
                             <select id="cursoRelatorio" multiple size="4">
@@ -647,7 +731,7 @@
                         </div>
                         <div class="form-group">
                             <label>Turno:</label>
-                            <select id="turnoRelatorioCurso">
+                            <select id="turnoRelatorioCurso" onchange="preencherSelectCursoRelatorio()">
                                 <option value="MANHA">Manhã</option>
                                 <option value="TARDE">Tarde</option>
                                 <option value="NOITE">Noite</option>
@@ -664,6 +748,7 @@
                             <label>Opções:</label>
                             <div class="inline-group">
                                 <label><input type="checkbox" id="omitirSabadoRelatorioCurso"> Omitir sábado</label>
+                                <label><input type="checkbox" id="contrastePdfCurso" checked> Melhorar contraste das letras</label>
                             </div>
                         </div>
                         <div class="form-group full-row">
@@ -675,9 +760,56 @@
                     </div>
                 </div>
 
+                <div class="card" id="cardRelatorioQr">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Horário rápido via QR Code</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleRelatorioQr" onclick="toggleRelatorioQr()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="form-grid relatorio-qr-body hidden" id="relatorioQrBody">
+                        <p class="hint" style="grid-column:1/-1;">
+                            Após ler o QR Code que aponta para esta página, o professor pode informar o próprio nome
+                            ou o aluno pode escolher a turma, e o sistema baixará automaticamente o PDF do horário.
+                        </p>
+                        <div class="form-group full-row" id="qrProfGroup">
+                            <label for="nomeProfessorConsultaRapida">Relatório rápido por Professor:</label>
+                            <div class="inline-group">
+                                <input type="text" id="nomeProfessorConsultaRapida" list="listaProfessoresRapida" placeholder="Ex.: Maria Silva" style="flex:1;">
+                                <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoProfessorPDF()">📄 Gerar PDF</button>
+                                <button type="button" class="btn-secondary" onclick="copiarLinkQrProfessor()">🔗 Copiar link</button>
+                            </div>
+                            <datalist id="listaProfessoresRapida"></datalist>
+                            <p class="hint">Use o nome completo ou parte do nome do professor.</p>
+                        </div>
+                        <div class="form-group full-row" id="qrTurmaGroup">
+                            <label for="turmaConsultaRapida">Relatório rápido por Turma:</label>
+                            <div class="inline-group">
+                                <select id="turmaConsultaRapida" style="flex:1;">
+                                    <option value="">Selecione a turma...</option>
+                                </select>
+                                <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoTurmaPDF()">📄 Gerar PDF</button>
+                                <button type="button" class="btn-secondary" onclick="copiarLinkQrTurma()">🔗 Copiar link</button>
+                            </div>
+                            <p class="hint">O PDF destacará somente a turma escolhida, com cores dos professores.</p>
+                        </div>
+                        <div class="form-group full-row">
+                            <label>Opções do PDF rápido:</label>
+                            <div class="inline-group">
+                                <label><input type="checkbox" id="qrPdfColorido" checked> PDF colorido</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
-                    <h3>Relatório por Professor</h3>
-                    <div class="form-grid">
+                    <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
+                        <h3>Relatório por Professor</h3>
+                        <button type="button" class="btn-icon-toggle collapsed" id="btnToggleRelatorioProfessor" onclick="toggleRelatorioProfessor()">
+                            ▼
+                        </button>
+                    </div>
+                    <div class="form-grid relatorio-professor-body hidden" id="relatorioProfessorBody">
                         <div class="form-group">
                             <label>Professor:</label>
                             <select id="professorRelatorio">
@@ -821,6 +953,7 @@
                         </table>
                     </div>
                 </div>
+
             </section>
 
         </main>

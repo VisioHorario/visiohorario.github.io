@@ -268,6 +268,60 @@ header {
     color: var(--secondary);
 }
 
+.card-header-inline {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.btn-icon-toggle {
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 4px 6px;
+    border-radius: 8px;
+    color: #34495e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.15s ease;
+}
+
+.btn-icon-toggle:hover {
+    background: rgba(0,0,0,0.04);
+    transform: translateY(1px);
+}
+
+.btn-icon-toggle.collapsed {
+    transform: rotate(-90deg);
+}
+
+.cadastro-rapido-body,
+.relatorio-turno-body,
+.relatorio-numero-turmas-body,
+.relatorio-curso-body,
+.relatorio-professor-body,
+.relatorio-qr-body,
+.limpeza-horarios-body,
+.atualizar-disciplina-body {
+    transition: max-height 0.2s ease, opacity 0.2s ease;
+}
+
+.cadastro-rapido-body.hidden,
+.relatorio-turno-body.hidden,
+.relatorio-numero-turmas-body.hidden,
+.relatorio-curso-body.hidden,
+.relatorio-professor-body.hidden,
+.relatorio-qr-body.hidden,
+.limpeza-horarios-body.hidden,
+.atualizar-disciplina-body.hidden {
+    display: none;
+}
+
 /* Formulários */
 .form-grid {
     display: grid;
@@ -288,6 +342,11 @@ header {
     display: flex;
     flex-direction: column;
     gap: 4px;
+}
+
+.relatorio-qr-body {
+    max-width: 480px;
+    width: 100%;
 }
 
 .form-group label {
@@ -343,6 +402,19 @@ header {
 
 .inline-group-prof-disciplinas {
     align-items: flex-end;
+}
+
+@media (max-width: 640px) {
+    .relatorio-qr-body {
+        max-width: 100%;
+    }
+    .relatorio-qr-body .inline-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .relatorio-qr-body .inline-group button {
+        width: 100%;
+    }
 }
 
 .turma-edit-row td {
@@ -690,7 +762,7 @@ button.small {
 }
 
 .celula-aula {
-    font-size: 0.72rem;
+    font-size: 0.8rem;
     line-height: 1.1;
     cursor: pointer;
     min-height: 50px;
@@ -704,7 +776,7 @@ button.small {
 }
 
 .celula-vazia {
-    font-size: 0.7rem;
+    font-size: 0.78rem;
     color: #bdc3c7;
     font-style: italic;
     cursor: pointer;
@@ -738,6 +810,14 @@ button.small {
     display: inline-flex;
     align-items: center;
     gap: 6px;
+}
+
+.filtros-grade-group > span,
+.filtros-grade-group > label {
+    font-size: 0.85rem;
+    font-style: italic;
+    display: inline-flex;
+    align-items: center;
 }
 
 .filtros-grade select {
@@ -791,6 +871,13 @@ button.small {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.editor-actions > label {
+    font-size: 0.85rem;
+    font-style: italic;
+    display: inline-flex;
+    align-items: center;
 }
 
 .hint {

@@ -765,6 +765,53 @@ function toggleRemoverApelidoDisciplina(chk) {
     }
 }
 
+function excluirDisciplina() {
+    const sel = document.getElementById('disciplinaApelidoSelect');
+    const inputApelido = document.getElementById('apelidoDisciplinaInput');
+    const chkRemover = document.getElementById('removerApelidoDisciplinaCheckbox');
+    if (!sel) return;
+    const disciplina = sel.value.trim();
+    if (!disciplina) {
+        mostrarToast('Selecione uma disciplina para excluir.', 'warning');
+        return;
+    }
+    const aulasUsando = aulas.filter(a => a.disciplina === disciplina);
+    if (aulasUsando.length > 0) {
+        mostrarToast(`Não é possível excluir. Esta disciplina está sendo usada em ${aulasUsando.length} aula(s).`, 'warning');
+        return;
+    }
+    const profUsando = professores.filter(p => Array.isArray(p.disciplinas) && p.disciplinas.includes(disciplina));
+    let mensagemConfirmacao = 'Deseja excluir esta disciplina?';
+    if (profUsando.length > 0) {
+        mensagemConfirmacao =
+            `Esta disciplina está associada a ${profUsando.length} professor(es), ` +
+            'mas não está lançada em nenhuma aula.\nDeseja excluir mesmo assim?';
+    }
+    if (!confirm(mensagemConfirmacao)) {
+        return;
+    }
+    professores.forEach(p => {
+        if (Array.isArray(p.disciplinas)) {
+            p.disciplinas = p.disciplinas.filter(d => d !== disciplina);
+        }
+    });
+    if (Object.prototype.hasOwnProperty.call(apelidosDisciplinas, disciplina)) {
+        delete apelidosDisciplinas[disciplina];
+    }
+    salvarLocal();
+    atualizarListaProfessores();
+    preencherSelectDisciplinasApelido();
+    sel.value = '';
+    if (inputApelido) {
+        inputApelido.value = '';
+        inputApelido.disabled = false;
+    }
+    if (chkRemover) {
+        chkRemover.checked = false;
+    }
+    mostrarToast('Disciplina excluída com sucesso!');
+}
+
 function mostrarToast(mensagem, tipo = 'success') {
     const toastAntigo = document.querySelector('.toast');
     if (toastAntigo && toastAntigo.parentNode) {
@@ -1722,6 +1769,20 @@ function mostrarHintEditorTurno() {
     text.style.display = chk.checked ? '' : 'none';
 }
 
+function atualizarInfoQtdTurmasTurnoNumero() {
+    const sel = document.getElementById('turnoRelatorioNumeroTurmas');
+    const span = document.getElementById('infoQtdTurmasTurnoNumero');
+    if (!sel || !span) return;
+    const turno = sel.value;
+    const qtd = turmas.filter(t => t.turno === turno).length;
+    if (!qtd) {
+        span.textContent = '';
+        return;
+    }
+    const sufixo = qtd === 1 ? 'turma' : 'turmas';
+    span.textContent = `(${qtd} ${sufixo})`;
+}
+
 function sairSistema() {
     usuarioLogado = null;
     try {
@@ -1764,6 +1825,7 @@ function showSection(id) {
     if (id === 'relatorios') {
         preencherSelectCursoRelatorio();
         preencherSelectProfessorRelatorio();
+        atualizarInfoQtdTurmasTurnoNumero();
     }
     if (id === 'horarios') {
         mostrarHintEditorTurno();
@@ -2444,6 +2506,7 @@ function atualizarListaProfessores() {
     const selProfRel = document.getElementById('professorRelatorio');
     const selProfModal = document.getElementById('modalProfessor');
     const selProfRapido = document.getElementById('rapidoProfessor');
+    const listaProfRapida = document.getElementById('listaProfessoresRapida');
 
     if (!corpo) return;
     corpo.innerHTML = '';
@@ -2451,6 +2514,7 @@ function atualizarListaProfessores() {
     if (selProfRel) selProfRel.innerHTML = '<option value="">Selecione...</option>';
     if (selProfModal) selProfModal.innerHTML = '<option value="">Selecione...</option>';
     if (selProfRapido) selProfRapido.innerHTML = '<option value="">Selecione...</option>';
+    if (listaProfRapida) listaProfRapida.innerHTML = '';
 
     const ordenados = [...professores].sort((a, b) => {
         const pesoBase = (x) => x.baseTipo === 'COMUM' ? 2 : 1;
@@ -2506,6 +2570,18 @@ function atualizarListaProfessores() {
 
         corpo.appendChild(tr);
 
+        if (selProfRapido) {
+            const opt4 = document.createElement('option');
+            opt4.value = p.id;
+            opt4.textContent = p.nome;
+            selProfRapido.appendChild(opt4);
+        }
+
+        if (listaProfRapida) {
+            const optList = document.createElement('option');
+            optList.value = p.nome;
+            listaProfRapida.appendChild(optList);
+        }
         const trEdit = document.createElement('tr');
         trEdit.className = 'prof-edit-row';
         trEdit.id = `editProfRow-${p.id}`;
@@ -3151,9 +3227,11 @@ function ajusteInteligenteInsercaoRapida(turno, turmaId, disciplina, professorId
 function atualizarListaTurmas() {
     const corpo = document.getElementById('listaTurmas');
     const selTurmaLimpeza = document.getElementById('turmaLimpeza');
+    const selTurmaRapida = document.getElementById('turmaConsultaRapida');
     if (!corpo) return;
     corpo.innerHTML = '';
     if (selTurmaLimpeza) selTurmaLimpeza.innerHTML = '<option value="">Selecione a turma...</option>';
+    if (selTurmaRapida) selTurmaRapida.innerHTML = '<option value="">Selecione a turma...</option>';
 
     const ordenadas = [...turmas].sort((a, b) => {
         const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
@@ -3222,6 +3300,13 @@ function atualizarListaTurmas() {
             opt.value = t.id;
             opt.textContent = `${t.nome} (${textoTurno(t.turno)})`;
             selTurmaLimpeza.appendChild(opt);
+        }
+
+        if (selTurmaRapida) {
+            const opt2 = document.createElement('option');
+            opt2.value = t.id;
+            opt2.textContent = `${t.nome} (${textoTurno(t.turno)})`;
+            selTurmaRapida.appendChild(opt2);
         }
 
         const trEdit = document.createElement('tr');
@@ -3798,26 +3883,33 @@ function montarGradeTurno(turno) {
                     const aula = obterAula(turno, dia, turma.id, tempo.id);
                     if (aula) {
                         td.className = 'celula-aula';
-
+                        
                         const prof = professores.find(p => p.id === aula.professorId);
                         const cor = prof ? prof.cor : '#3498db';
-
+                        
                         const bloco = document.createElement('div');
                         bloco.className = 'bloco-aula';
                         bloco.style.backgroundColor = cor;
-                        bloco.style.color = '#fff';
+                        const usarContrasteTela = document.getElementById('chkContrasteAutomaticoTela')?.checked ?? true;
+                        const textColor = usarContrasteTela ? getContrastingTextColor(cor) : '#ffffff';
+                        bloco.style.color = textColor;
                         bloco.style.padding = '4px 6px';
                         bloco.style.borderRadius = '4px';
-                        bloco.style.fontSize = '0.7rem';
+                        bloco.style.fontSize = '0.8rem';
                         bloco.style.minHeight = '40px';
                         bloco.style.display = 'flex';
                         bloco.style.flexDirection = 'column';
                         bloco.style.justifyContent = 'center';
                         bloco.style.position = 'relative';
-
+                        
                         bloco.innerHTML =
                             '<strong>' + abreviar(apelidarDisciplina(aula.disciplina), 14) + '</strong>' +
                             '<small>' + (prof ? abreviar(prof.nome, 14) : 'Sem professor') + '</small>';
+
+                        const smallEl = bloco.querySelector('small');
+                        if (smallEl) {
+                            smallEl.style.color = textColor;
+                        }
 
                         const chaveCont = turma.id + '||' + (aula.disciplina || '') + '||' + (aula.professorId || '');
                         const totalDisciplinaTurma = mapaContagemDisciplinaTurma[chaveCont] || 0;
@@ -4683,6 +4775,78 @@ function ajusteInteligente() {
     );
 }
 
+function executarAjusteInteligente() {
+    const chk = document.getElementById('chkUsarIaNoAjuste');
+    const usarIa = !!(chk && chk.checked);
+    if (usarIa) {
+        ajusteIA();
+    } else {
+        ajusteInteligente();
+    }
+}
+
+async function ajusteIA() {
+    if (!confirm('O Ajuste IA vai tentar reorganizar os horários deste turno com base nas regras atuais da aplicação. Continuar?')) {
+        return;
+    }
+
+    const turno = turnoAtualGrade;
+    const payload = montarPayloadAjusteIA(turno);
+    await solicitarAjusteIABackend(payload);
+
+    ajusteInteligente();
+    verificarConflitosTurno();
+    mostrarToast('Ajuste IA aplicado. Revise a grade e use "Desfazer" se necessário.');
+}
+
+function obterEscolaIdAtual() {
+    return 'EETEPA';
+}
+
+function montarPayloadAjusteIA(turno) {
+    const turmasTurno = turmas.filter(t => t.turno === turno);
+    const aulasTurno = aulas.filter(a => a.turno === turno);
+    const escolaId = obterEscolaIdAtual();
+    return {
+        escolaId,
+        turno,
+        turmas: turmasTurno,
+        aulas: aulasTurno,
+        professores
+    };
+}
+
+function solicitarAjusteIABackend(payload) {
+    return fetch('http://localhost:3001/ajuste-ia', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+    })
+        .then(r => r.json())
+        .then(resposta => {
+            if (!resposta || resposta.status !== 'ok' || !Array.isArray(resposta.aulas)) {
+                return null;
+            }
+            const turno = payload.turno;
+            aulas = aulas.filter(a => a.turno !== turno);
+            resposta.aulas.forEach(a => {
+                aulas.push({
+                    id: a.id || gerarId(),
+                    turno: a.turno,
+                    dia: a.dia,
+                    turmaId: a.turmaId,
+                    tempoId: a.tempoId,
+                    disciplina: a.disciplina,
+                    professorId: a.professorId || null
+                });
+            });
+            salvarLocal();
+            montarGradeTurno(turnoAtualGrade);
+            return resposta;
+        })
+        .catch(() => null);
+}
+
 function desfazerAjuste() {
     const turno = turnoAtualGrade;
     if (!pilhaUndo.length) {
@@ -4762,10 +4926,27 @@ function preencherSelectCursoRelatorio() {
     const selFiltroCurso = document.getElementById('filtroCursoConsulta');
     if (sel) {
         sel.innerHTML = '';
-        cursos.forEach(curso => {
+
+        const turnoSel = document.getElementById('turnoRelatorioCurso');
+        const turno = turnoSel ? turnoSel.value : '';
+
+        const mapaContagem = {};
+        turmas.forEach(t => {
+            if (turno && t.turno !== turno) return;
+            const nomeCurso = t.curso || '';
+            if (!nomeCurso) return;
+            mapaContagem[nomeCurso] = (mapaContagem[nomeCurso] || 0) + 1;
+        });
+
+        const listaCursos = Object.keys(mapaContagem).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+        listaCursos.forEach(curso => {
             const opt = document.createElement('option');
             opt.value = curso;
-            opt.textContent = curso;
+            const qtd = mapaContagem[curso] || 0;
+            const sufixo = qtd > 0 ? ` (${qtd} Turma${qtd > 1 ? 's' : ''})` : '';
+            opt.textContent = curso + sufixo;
+            opt.setAttribute('data-label-curso', curso);
+            opt.setAttribute('data-qtd-turmas', String(qtd));
             sel.appendChild(opt);
         });
     }
@@ -4792,9 +4973,576 @@ function preencherSelectProfessorRelatorio() {
     });
 }
 
+function normalizarTextoSimples(str) {
+    return (str || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .trim();
+}
+
+function encontrarProfessorPorNome(nome) {
+    const alvo = normalizarTextoSimples(nome);
+    if (!alvo) return null;
+    let exato = professores.find(p => normalizarTextoSimples(p.nome) === alvo);
+    if (exato) return exato;
+    return professores.find(p => normalizarTextoSimples(p.nome).includes(alvo)) || null;
+}
+
+function montarLinhasConsultaRapida(aulasFiltradas, titulo) {
+    const tbody = document.getElementById('tabelaConsultaRapidaBody');
+    const resumo = document.getElementById('consultaRapidaResumo');
+    if (!tbody || !resumo) return;
+
+    tbody.innerHTML = '';
+
+    if (!aulasFiltradas || aulasFiltradas.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 11;
+        td.textContent = 'Nenhum horário encontrado para os filtros informados.';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        resumo.textContent = titulo;
+        return;
+    }
+
+    const carga = calcularCargaHorariaProfessor(aulasFiltradas);
+
+    const cargaPorDisciplinaTurnoSemana = {};
+    aulasFiltradas.forEach(a => {
+        if (!a) return;
+        const disc = a.disciplina || '';
+        const turno = a.turno || '';
+        if (!disc || !turno) return;
+        const key = `${disc}__${turno}`;
+        if (!cargaPorDisciplinaTurnoSemana[key]) cargaPorDisciplinaTurnoSemana[key] = 0;
+        cargaPorDisciplinaTurnoSemana[key] += 1;
+    });
+    const cargaPorDisciplinaTurnoMes = {};
+    Object.keys(cargaPorDisciplinaTurnoSemana).forEach(key => {
+        const tempos = cargaPorDisciplinaTurnoSemana[key];
+        cargaPorDisciplinaTurnoMes[key] = tempos * 5;
+    });
+
+    const grupos = {};
+    aulasFiltradas.forEach(a => {
+        const key = `${a.dia}_${a.turno}`;
+        if (!grupos[key]) grupos[key] = [];
+        grupos[key].push(a);
+    });
+
+    const chavesOrdenadas = Object.keys(grupos).sort((a, b) => {
+        const [diaA, turnoA] = a.split('_');
+        const [diaB, turnoB] = b.split('_');
+        const ordemTurno = { MANHA: 1, TARDE: 2, NOITE: 3 };
+        const ta = ordemTurno[turnoA] || 99;
+        const tb = ordemTurno[turnoB] || 99;
+        if (ta !== tb) return ta - tb;
+        const idxDiaA = DIAS_SEMANA.indexOf(diaA);
+        const idxDiaB = DIAS_SEMANA.indexOf(diaB);
+        return idxDiaA - idxDiaB;
+    });
+
+    const linhasPorTurnoCH = {};
+    chavesOrdenadas.forEach(key => {
+        const [, turno] = key.split('_');
+        const qtd = (grupos[key] || []).length;
+        if (!qtd) return;
+        linhasPorTurnoCH[turno] = (linhasPorTurnoCH[turno] || 0) + qtd;
+    });
+    const turnosCHImpressos = new Set();
+
+    chavesOrdenadas.forEach(chave => {
+        const [dia, turno] = chave.split('_');
+        const aulasGrupo = (grupos[chave] || []).slice().sort((a, b) => {
+            return (a.tempoId || 0) - (b.tempoId || 0);
+        });
+
+        aulasGrupo.forEach((a, idx) => {
+            const turma = turmas.find(t => t.id === a.turmaId);
+            const tempo = getTempos(turno).find(t => t.id === a.tempoId);
+
+            const tr = document.createElement('tr');
+
+            if (idx === 0) {
+                const tdDia = document.createElement('td');
+                tdDia.textContent = textoDia(dia);
+                tdDia.rowSpan = aulasGrupo.length;
+                tdDia.style.verticalAlign = 'middle';
+                tr.appendChild(tdDia);
+
+                const tdTurno = document.createElement('td');
+                tdTurno.textContent = textoTurno(turno);
+                tdTurno.rowSpan = aulasGrupo.length;
+                tdTurno.style.verticalAlign = 'middle';
+                tr.appendChild(tdTurno);
+            }
+
+            const tdHorario = document.createElement('td');
+            tdHorario.textContent = tempo ? `${tempo.inicio} - ${tempo.fim}` : '';
+            tr.appendChild(tdHorario);
+
+            const tdTempo = document.createElement('td');
+            tdTempo.textContent = tempo ? tempo.etiqueta : '';
+            tr.appendChild(tdTempo);
+
+            const turmaNome = turma ? turma.nome : '';
+            const tipoTexto = turma ? (textoTipoTurma(turma.tipoTurma) || '-') : '';
+            const anoTexto = turma ? (textoAnoTurma(turma.anoTurma) || '-') : '';
+            const faseTexto = turma ? (textoFaseTurma(turma.faseTurma) || '-') : '';
+
+            const tdTurma = document.createElement('td');
+            tdTurma.textContent = turmaNome;
+            tr.appendChild(tdTurma);
+
+            const tdTipo = document.createElement('td');
+            tdTipo.textContent = tipoTexto;
+            tr.appendChild(tdTipo);
+
+            const tdAno = document.createElement('td');
+            tdAno.textContent = anoTexto;
+            tr.appendChild(tdAno);
+
+            const tdFase = document.createElement('td');
+            tdFase.textContent = faseTexto;
+            tr.appendChild(tdFase);
+
+            const tdDisciplina = document.createElement('td');
+            tdDisciplina.textContent = apelidarDisciplina(a.disciplina || '');
+            tdDisciplina.style.whiteSpace = 'normal';
+            tdDisciplina.style.wordBreak = 'break-word';
+            tr.appendChild(tdDisciplina);
+
+            const tdHoraAula = document.createElement('td');
+            const keyDiscTurno = (a.disciplina && turno) ? `${a.disciplina}__${turno}` : null;
+            const horasMesDisc = keyDiscTurno ? (cargaPorDisciplinaTurnoMes[keyDiscTurno] || 0) : 0;
+            tdHoraAula.textContent = horasMesDisc ? `${horasMesDisc}h` : '';
+            tdHoraAula.style.textAlign = 'center';
+            tr.appendChild(tdHoraAula);
+
+            const tdCHTurno = document.createElement('td');
+            if (!turnosCHImpressos.has(turno)) {
+                const infoTurno = (carga && carga.porTurno && carga.porTurno[turno]) ? carga.porTurno[turno] : null;
+                const horasMesTurno = infoTurno ? infoTurno.horasMes : 0;
+                tdCHTurno.textContent = horasMesTurno ? `${horasMesTurno}h` : '';
+                tdCHTurno.style.textAlign = 'center';
+                tdCHTurno.rowSpan = linhasPorTurnoCH[turno] || aulasGrupo.length;
+                tdCHTurno.style.verticalAlign = 'middle';
+                tr.appendChild(tdCHTurno);
+                turnosCHImpressos.add(turno);
+            } else {
+                const tdVazio = document.createElement('td');
+                tdVazio.textContent = '';
+                tr.appendChild(tdVazio);
+            }
+
+            tbody.appendChild(tr);
+        });
+    });
+
+    resumo.textContent = titulo;
+}
+
+function consultarHorarioProfessorRapido() {
+    const input = document.getElementById('nomeProfessorConsultaRapida');
+    if (!input) return;
+    const nome = input.value;
+    const prof = encontrarProfessorPorNome(nome);
+    if (!prof) {
+        mostrarToast('Professor não encontrado. Verifique o nome digitado.', 'warning');
+        return;
+    }
+
+    const aulasProf = aulas.filter(a => a.professorId === prof.id);
+    montarLinhasConsultaRapida(aulasProf, `Horários do professor ${prof.nome}`);
+}
+
+function consultarHorarioTurmaRapido() {
+    const sel = document.getElementById('turmaConsultaRapida');
+    if (!sel) return;
+    const turmaId = sel.value;
+    if (!turmaId) {
+        mostrarToast('Selecione uma turma para consultar os horários.', 'warning');
+        return;
+    }
+
+    const turma = turmas.find(t => t.id === turmaId);
+    const aulasTurma = aulas.filter(a => a.turmaId === turmaId);
+    const nomeTurma = turma ? turma.nome : turmaId;
+    montarLinhasConsultaRapida(aulasTurma, `Horários da turma ${nomeTurma}`);
+}
+
+function gerarRelatorioRapidoProfessorPDF() {
+    const { jsPDF } = window.jspdf;
+    const input = document.getElementById('nomeProfessorConsultaRapida');
+    if (!input) return;
+    const nome = input.value;
+    const prof = encontrarProfessorPorNome(nome);
+    if (!prof) {
+        mostrarToast('Professor não encontrado. Verifique o nome digitado.', 'warning');
+        return;
+    }
+
+    const chkColorido = document.getElementById('qrPdfColorido');
+    const usarColorido = !chkColorido || chkColorido.checked;
+
+    const aulasProf = aulas.filter(a => a.professorId === prof.id);
+    if (!aulasProf.length) {
+        mostrarToast('Este professor não possui aulas lançadas.', 'warning');
+        return;
+    }
+
+    const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+    });
+
+    const agora = new Date();
+    const dataStr = agora.toLocaleDateString('pt-BR');
+    const horaStr = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const baseLabelProf = prof.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
+    const tituloBase = `HORÁRIO DO PROFESSOR - ${prof.nome.toUpperCase()} (${baseLabelProf})`;
+
+    const turmasProf = Array.from(new Set(
+        aulasProf
+            .map(a => {
+                const turma = turmas.find(t => t.id === a.turmaId);
+                return turma ? turma.nome : null;
+            })
+            .filter(Boolean)
+    ));
+
+    const corProf = prof.cor || '#3498db';
+
+    TURNOS.forEach((turno, idxTurno) => {
+        const aulasTurno = aulasProf.filter(a => a.turno === turno);
+        if (!aulasTurno.length) return;
+
+        if (idxTurno > 0) {
+            doc.addPage();
+        }
+
+        const titulo = `${tituloBase} - TURNO DA ${textoTurno(turno).toUpperCase()}`;
+        doc.setFontSize(10);
+        doc.setFont(undefined, 'bold');
+        doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 10, { align: 'center' });
+
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'normal');
+        doc.text(`Gerado em: ${dataStr} às ${horaStr}`, doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
+
+        const turmasLabel = turmasProf.length ? `Turmas: ${turmasProf.join(', ')}` : 'Turmas: (nenhuma turma encontrada)';
+        doc.text(turmasLabel, doc.internal.pageSize.getWidth() / 2, 19, { align: 'center' });
+
+        const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+
+        const diasUsados = DIAS_SEMANA.filter(dia =>
+            aulasTurno.some(a => a.dia === dia)
+        );
+
+        const cabecalhoDias = diasUsados.map(dia => {
+            return textoDia(dia).substring(0, 3).toUpperCase();
+        });
+
+        const head = [['HORÁRIO', ...cabecalhoDias]];
+        const body = [];
+
+        temposTurno.forEach(tempo => {
+            const row = [];
+            row.push(`${tempo.inicio}\n${tempo.fim}`);
+
+            diasUsados.forEach(dia => {
+                const aula = aulasTurno.find(a => a.dia === dia && a.tempoId === tempo.id);
+                if (!aula) {
+                    row.push('');
+                } else {
+                    const turma = turmas.find(t => t.id === aula.turmaId);
+                    const nomeDisc = apelidarDisciplina(aula.disciplina || '');
+                    const nomeTurma = turma ? turma.nome : '';
+                    row.push(nomeTurma ? `${nomeDisc}\n${nomeTurma}` : nomeDisc);
+                }
+            });
+
+            body.push(row);
+        });
+
+        doc.autoTable({
+            head,
+            body,
+            startY: 24,
+            theme: 'grid',
+            styles: {
+                fontSize: 7,
+                cellPadding: 1.2,
+                valign: 'middle',
+                halign: 'center',
+                minCellHeight: 8
+            },
+            headStyles: usarColorido ? {
+                fillColor: [52, 152, 219],
+                textColor: 255,
+                fontStyle: 'bold',
+                fontSize: 7,
+                cellPadding: 1.2,
+                minCellHeight: 10,
+                halign: 'center',
+                valign: 'middle'
+            } : {
+                fillColor: [240, 240, 240],
+                textColor: 0,
+                fontStyle: 'bold',
+                fontSize: 7,
+                cellPadding: 1.2,
+                minCellHeight: 10,
+                halign: 'center',
+                valign: 'middle'
+            },
+            columnStyles: {
+                0: { cellWidth: 14 }
+            },
+            columnStyles: {
+                0: { cellWidth: 18 }
+            },
+            didParseCell: function(data) {
+                if (!usarColorido) return;
+                if (data.section !== 'body') return;
+                if (data.column.index === 0) return;
+                const texto = (data.cell.raw || '').toString();
+                if (!texto) return;
+                const rgb = hexToRgb(corProf);
+                if (!rgb) return;
+                data.cell.styles.fillColor = [rgb.r, rgb.g, rgb.b];
+                data.cell.styles.textColor = getPdfTextColor(corProf);
+            }
+        });
+    });
+
+    doc.save(`horario_prof_qr_${prof.nome.replace(/\s+/g, '_').toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`);
+    mostrarToast('PDF rápido do professor gerado com sucesso!');
+}
+
+function gerarRelatorioRapidoTurmaPDF() {
+    const { jsPDF } = window.jspdf;
+    const sel = document.getElementById('turmaConsultaRapida');
+    if (!sel) return;
+    const turmaId = sel.value;
+    if (!turmaId) {
+        mostrarToast('Selecione uma turma para gerar o PDF.', 'warning');
+        return;
+    }
+
+    const turma = turmas.find(t => t.id === turmaId);
+    if (!turma) {
+        mostrarToast('Turma não encontrada.', 'error');
+        return;
+    }
+
+    const chkColorido = document.getElementById('qrPdfColorido');
+    const usarColorido = !chkColorido || chkColorido.checked;
+
+    const turno = turma.turno;
+    const aulasTurma = aulas.filter(a => a.turmaId === turmaId && a.turno === turno);
+    if (!aulasTurma.length) {
+        mostrarToast('Não há aulas lançadas para esta turma.', 'warning');
+        return;
+    }
+
+    const doc = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+    });
+
+    const agora = new Date();
+    const dataStr = agora.toLocaleDateString('pt-BR');
+    const horaStr = agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    const titulo = `HORÁRIO - TURMA ${turma.nome.toUpperCase()} - TURNO DA ${textoTurno(turno).toUpperCase()}`;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 10, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Gerado em: ${dataStr} às ${horaStr}`, doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
+
+    const temposTurno = getTempos(turno).filter(t => !t.intervalo);
+
+    const diasUsados = DIAS_SEMANA.filter(dia =>
+        aulasTurma.some(a => a.dia === dia)
+    );
+
+    const cabecalhoDias = diasUsados.map(dia => {
+        return textoDia(dia).substring(0, 3).toUpperCase();
+    });
+
+    const head = [['HORÁRIO', ...cabecalhoDias]];
+    const body = [];
+
+    temposTurno.forEach(tempo => {
+        const row = [];
+        row.push(`${tempo.inicio}\n${tempo.fim}`);
+
+        diasUsados.forEach(dia => {
+            const aula = aulasTurma.find(a => a.dia === dia && a.tempoId === tempo.id);
+            if (!aula) {
+                row.push('');
+            } else {
+                const prof = professores.find(p => p.id === aula.professorId);
+                const nomeDisc = apelidarDisciplina(aula.disciplina || '');
+                const nomeProf = prof ? prof.nome : '';
+                row.push(nomeProf ? `${nomeDisc}\n${nomeProf}` : nomeDisc);
+            }
+        });
+
+        body.push(row);
+    });
+
+    doc.autoTable({
+        head,
+        body,
+        startY: 22,
+        theme: 'grid',
+        styles: {
+            fontSize: 7,
+            cellPadding: 1.2,
+            valign: 'middle',
+            halign: 'center',
+            minCellHeight: 8
+        },
+        headStyles: usarColorido ? {
+            fillColor: [52, 152, 219],
+            textColor: 255,
+            fontStyle: 'bold',
+            fontSize: 7,
+            cellPadding: 1.2,
+            minCellHeight: 10,
+            halign: 'center',
+            valign: 'middle'
+        } : {
+            fillColor: [240, 240, 240],
+            textColor: 0,
+            fontStyle: 'bold',
+            fontSize: 7,
+            cellPadding: 1.2,
+            minCellHeight: 10,
+            halign: 'center',
+            valign: 'middle'
+        },
+        columnStyles: {
+            0: { cellWidth: 18 }
+        },
+        didParseCell: function(data) {
+            if (!usarColorido) return;
+            if (data.section !== 'body') return;
+            if (data.column.index === 0) return;
+            const texto = (data.cell.raw || '').toString();
+            if (!texto) return;
+            const linhas = texto.split('\n');
+            const nomeProf = linhas.length > 1 ? linhas[linhas.length - 1].trim() : '';
+            if (!nomeProf) return;
+            const prof = professores.find(p => (p.nome || '').trim() === nomeProf);
+            if (!prof || !prof.cor) return;
+            const rgb = hexToRgb(prof.cor);
+            if (!rgb) return;
+            data.cell.styles.fillColor = [rgb.r, rgb.g, rgb.b];
+            data.cell.styles.textColor = getPdfTextColor(prof.cor);
+        }
+    });
+
+    doc.save(`horario_turma_qr_${turma.nome.replace(/\s+/g, '_').toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`);
+    mostrarToast('PDF rápido da turma gerado com sucesso!');
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     renderDisponibilidade('dispProfessor', null);
+
+    const params = new URLSearchParams(window.location.search || '');
+    const hasProfShort = params.has('p');
+    const hasTurmaShort = params.has('t');
+    const modoQr = params.get('qr') === '1' || params.get('modo') === 'qr' || hasProfShort || hasTurmaShort;
+    const alvoQr = params.get('alvo') || (hasProfShort ? 'prof' : hasTurmaShort ? 'turma' : '');
+
+    if (modoQr) {
+        const navButtons = document.querySelectorAll('.menu-btn');
+        navButtons.forEach(btn => {
+            const onclick = btn.getAttribute('onclick') || '';
+            if (!onclick.includes("showSection('relatorios'")) {
+                btn.style.display = 'none';
+            }
+        });
+
+        showSection('relatorios');
+        const secRel = document.getElementById('relatorios');
+        if (secRel && typeof secRel.scrollIntoView === 'function') {
+            secRel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+
+        const qrCard = document.getElementById('cardRelatorioQr');
+        const outrosCards = document.querySelectorAll('#relatorios .card');
+        outrosCards.forEach(card => {
+            if (card !== qrCard) {
+                card.style.display = 'none';
+            }
+        });
+
+        const qrBody = document.getElementById('relatorioQrBody');
+        const btnToggleQr = document.getElementById('btnToggleRelatorioQr');
+        if (qrBody) {
+            qrBody.classList.remove('hidden');
+        }
+        if (btnToggleQr) {
+            btnToggleQr.classList.remove('collapsed');
+        }
+
+        const grupoProf = document.getElementById('qrProfGroup');
+        const grupoTurma = document.getElementById('qrTurmaGroup');
+        if (alvoQr === 'prof' && grupoTurma) {
+            grupoTurma.style.display = 'none';
+        } else if (alvoQr === 'turma' && grupoProf) {
+            grupoProf.style.display = 'none';
+        }
+    }
 });
+
+function copiarLinkQrProfessor() {
+    const base = window.location.origin + window.location.pathname;
+    const url = `${base}?p=1`;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(() => {
+                mostrarToast('Link de consulta rápida do professor copiado!', 'success');
+            }).catch(() => {
+                window.prompt('Copie o link abaixo:', url);
+            });
+        } else {
+            window.prompt('Copie o link abaixo:', url);
+        }
+    } catch (e) {
+        window.prompt('Copie o link abaixo:', url);
+    }
+}
+
+function copiarLinkQrTurma() {
+    const base = window.location.origin + window.location.pathname;
+    const url = `${base}?t=1`;
+    try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(url).then(() => {
+                mostrarToast('Link de consulta rápida da turma copiado!', 'success');
+            }).catch(() => {
+                window.prompt('Copie o link abaixo:', url);
+            });
+        } else {
+            window.prompt('Copie o link abaixo:', url);
+        }
+    } catch (e) {
+        window.prompt('Copie o link abaixo:', url);
+    }
+}
 
 // =======================
 // CONFIG TEMPOS POR TURNO
@@ -4813,6 +5561,111 @@ function selecionarTurnoTempos(btn) {
         btn.classList.add('selecionado');
     }
     renderTemposTurno();
+}
+
+function toggleCadastroRapido() {
+    const form = document.getElementById('formHorario');
+    const btn = document.getElementById('btnToggleCadastroRapido');
+    if (!form || !btn) return;
+    const hidden = form.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleRelatorioTurno() {
+    const body = document.getElementById('relatorioTurnoBody');
+    const btn = document.getElementById('btnToggleRelatorioTurno');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleRelatorioNumeroTurmas() {
+    const body = document.getElementById('relatorioNumeroTurmasBody');
+    const btn = document.getElementById('btnToggleRelatorioNumeroTurmas');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleRelatorioCurso() {
+    const body = document.getElementById('relatorioCursoBody');
+    const btn = document.getElementById('btnToggleRelatorioCurso');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleRelatorioProfessor() {
+    const body = document.getElementById('relatorioProfessorBody');
+    const btn = document.getElementById('btnToggleRelatorioProfessor');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleRelatorioQr() {
+    const body = document.getElementById('relatorioQrBody');
+    const btn = document.getElementById('btnToggleRelatorioQr');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function toggleLimpezaHorarios() {
+    const body = document.getElementById('limpezaHorariosBody');
+    const btn = document.getElementById('btnToggleLimpezaHorarios');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
+}
+
+function cardHeaderToggleClick(event) {
+    const header = event.currentTarget;
+    if (event.target.closest('button')) return;
+    const btn = header.querySelector('.btn-icon-toggle');
+    if (btn) {
+        btn.click();
+    }
+}
+
+function toggleAtualizarDisciplina() {
+    const body = document.getElementById('atualizarDisciplinaBody');
+    const btn = document.getElementById('btnToggleAtualizarDisciplina');
+    if (!body || !btn) return;
+    const hidden = body.classList.toggle('hidden');
+    if (hidden) {
+        btn.classList.add('collapsed');
+    } else {
+        btn.classList.remove('collapsed');
+    }
 }
 
 function turnoTemposSelecionado() {
@@ -5064,15 +5917,22 @@ function gerarRelatorioTurnoPDF() {
                         row.push('-');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
-                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '');
+                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '').toUpperCase();
                         const nomeProfessor = prof ? prof.nome : '';
                         const textoCelula = nomeProfessor ? `${nomeDisciplina}\n${nomeProfessor}` : nomeDisciplina;
+                        const usarContrastePdfTurno = document.getElementById('contrastePdfTurno')?.checked ?? true;
+                        const usarContrastePdfCurso = document.getElementById('contrastePdfCurso')?.checked ?? true;
                         if (layout === 'colorido' && prof && prof.cor) {
                             const rgb = hexToRgb(prof.cor);
                             if (rgb) {
                                 row.push({
                                     content: textoCelula,
-                                    styles: { fillColor: [rgb.r, rgb.g, rgb.b], textColor: 255, valign: 'middle', halign: 'center' }
+                                    styles: {
+                                        fillColor: [rgb.r, rgb.g, rgb.b],
+                                        textColor: usarContrastePdfTurno ? getPdfTextColor(prof.cor) : 255,
+                                        valign: 'middle',
+                                        halign: 'center'
+                                    }
                                 });
                             } else {
                                 row.push(textoCelula);
@@ -5101,7 +5961,12 @@ function gerarRelatorioTurnoPDF() {
         }
     });
 
-    const bodyFont = colCount > 12 ? 8 : 7;
+    let bodyFont = 10;
+    if (colCount > 16) {
+        bodyFont = 8;
+    } else if (colCount > 12) {
+        bodyFont = 9;
+    }
     doc.autoTable({
         head,
         body,
@@ -5116,7 +5981,7 @@ function gerarRelatorioTurnoPDF() {
             cellWidth: 'wrap',
             minCellHeight: 6
         },
-        margin: { top: 6, right: 6, bottom: 6, left: 6 },
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
         headStyles: {
             fillColor: [52, 152, 219],
             textColor: 255,
@@ -5192,6 +6057,206 @@ function gerarRelatorioTurnoPDF() {
     mostrarToast('PDF gerado com sucesso!');
 }
 
+function gerarRelatorioTurnoNumeroTurmasPDF() {
+    const { jsPDF } = window.jspdf;
+    const turnoSel = document.getElementById('turnoRelatorioNumeroTurmas');
+    const qtdInput = document.getElementById('qtdTurmasRelatorio');
+    const chkOmitirSabado = document.getElementById('omitirSabadoRelatoriosQtdTurmas');
+    const turno = turnoSel ? turnoSel.value : 'MANHA';
+    let qtd = qtdInput ? parseInt(qtdInput.value, 10) : 7;
+    if (!qtd || qtd < 1) qtd = 1;
+    if (qtd > 20) qtd = 20;
+    const omitirSabado = !!(chkOmitirSabado && chkOmitirSabado.checked);
+
+    let turmasTurno = turmas.filter(t => t.turno === turno).sort(compararTurmasPorCursoETipo);
+    const ordemSalva = ORDEM_TURMAS_POR_TURNO[turno];
+    if (Array.isArray(ordemSalva) && ordemSalva.length) {
+        const mapaPos = new Map();
+        ordemSalva.forEach((id, idx) => {
+            if (!mapaPos.has(id)) mapaPos.set(id, idx);
+        });
+        turmasTurno.sort((a, b) => {
+            const ia = mapaPos.has(a.id) ? mapaPos.get(a.id) : Number.MAX_SAFE_INTEGER;
+            const ib = mapaPos.has(b.id) ? mapaPos.get(b.id) : Number.MAX_SAFE_INTEGER;
+            if (ia !== ib) return ia - ib;
+            return 0;
+        });
+    }
+    if (!turmasTurno.length) {
+        mostrarToast('Não há turmas neste turno.', 'warning');
+        return;
+    }
+
+    const diasUsados = DIAS_SEMANA.filter(d => !(omitirSabado && d === 'SABADO'));
+    const temposTurnoBase = getTempos(turno);
+    const totalLinhas = diasUsados.length * temposTurnoBase.length + (diasUsados.length - 1);
+    let formatoPagina = 'a4';
+    if (totalLinhas > 36) {
+        formatoPagina = 'a3';
+    }
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: formatoPagina });
+
+    const grupos = [];
+    for (let i = 0; i < turmasTurno.length; i += qtd) {
+        grupos.push(turmasTurno.slice(i, i + qtd));
+    }
+
+    grupos.forEach((grupo, idxGrupo) => {
+        if (!grupo.length) return;
+        if (idxGrupo > 0) {
+            doc.addPage();
+        }
+
+        const titulo = `HORÁRIO - TURNO DA ${textoTurno(turno).toUpperCase()} — Grupo ${idxGrupo + 1} de ${grupos.length} — ${grupo.length} turmas por página — Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`;
+        doc.setFont(undefined, 'bold');
+        doc.setFontSize(8);
+        doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 6, { align: 'center' });
+
+        const head = [['DIA', 'HORÁRIO', ...grupo.map(t => t.nome)]];
+        const body = [];
+        const colCount = 2 + grupo.length;
+        let bodyFont = 10;
+        if (colCount > 16) {
+            bodyFont = 8;
+        } else if (colCount > 12) {
+            bodyFont = 9;
+        }
+        let minCellHeight = 4;
+
+        diasUsados.forEach((dia, idxDia) => {
+            const temposTurno = temposTurnoBase;
+            temposTurno.forEach((tempo, idxTempo) => {
+                const row = [];
+                if (idxTempo === 0) {
+                    row.push({
+                        content: textoDia(dia),
+                        rowSpan: temposTurno.length,
+                        styles: { valign: 'middle', halign: 'center' }
+                    });
+                }
+                row.push(`${tempo.inicio} - ${tempo.fim}`);
+
+                if (tempo.intervalo) {
+                    grupo.forEach(() => row.push('INTERVALO'));
+                } else {
+                    grupo.forEach(turma => {
+                        const aula = obterAula(turno, dia, turma.id, tempo.id);
+                        if (!aula) {
+                            row.push('-');
+                        } else {
+                            const prof = professores.find(p => p.id === aula.professorId);
+                            const nomeDisciplina = apelidarDisciplina(aula.disciplina || '').toUpperCase();
+                            const nomeProfessor = prof ? prof.nome : '';
+                            const textoCelula = nomeProfessor ? `${nomeDisciplina}\n${nomeProfessor}` : nomeDisciplina;
+                            const usarContrastePdfNumeroTurmas = document.getElementById('contrastePdfNumeroTurmas')?.checked ?? true;
+                            if (prof && prof.cor) {
+                                const rgb = hexToRgb(prof.cor);
+                                if (rgb) {
+                                    row.push({
+                                        content: textoCelula,
+                                        styles: {
+                                            fillColor: [rgb.r, rgb.g, rgb.b],
+                                            textColor: usarContrastePdfNumeroTurmas ? getPdfTextColor(prof.cor) : 255,
+                                            valign: 'middle',
+                                            halign: 'center'
+                                        }
+                                    });
+                                } else {
+                                    row.push(textoCelula);
+                                }
+                            } else {
+                                row.push(textoCelula);
+                            }
+                        }
+                    });
+                }
+
+                body.push(row);
+            });
+
+            if (idxDia < diasUsados.length - 1) {
+                body.push([{
+                    content: '',
+                    colSpan: colCount,
+                    styles: {
+                        fillColor: [60, 60, 60],
+                        textColor: 255,
+                        cellPadding: 0,
+                        minCellHeight: 1
+                    }
+                }]);
+            }
+        });
+
+        doc.autoTable({
+            head,
+            body,
+            startY: 8,
+            theme: 'grid',
+            styles: {
+                fontSize: bodyFont,
+                cellPadding: 1,
+                valign: 'middle',
+                halign: 'center',
+                overflow: 'linebreak',
+                cellWidth: 'wrap',
+                minCellHeight: minCellHeight
+            },
+            margin: { top: 0, right: 0, bottom: 0, left: 0 },
+            headStyles: {
+                fillColor: [52, 152, 219],
+                textColor: 255,
+                fontStyle: 'bold',
+                fontSize: 8,
+                cellPadding: 1,
+                halign: 'center',
+                valign: 'middle'
+            },
+            columnStyles: {
+                0: { cellWidth: 10, cellPadding: 0 },
+                1: { cellWidth: 20, fontStyle: 'bold' }
+            },
+            didParseCell: function(data) {
+                if (data.section === 'body') {
+                    if (data.column.index === 0) {
+                        data.cell.text = [];
+                    } else if (data.column.index >= 2) {
+                        const raw = data.row.raw[data.column.index];
+                        const text = typeof raw === 'string'
+                            ? raw
+                            : (raw && raw.content ? raw.content : '');
+                        if (text && text.indexOf('\n') !== -1) {
+                            data.cell.styles.fontSize = bodyFont + 1;
+                        }
+                    }
+                }
+            },
+            didDrawCell: function(data) {
+                if (data.section === 'body' && data.column.index === 0) {
+                    const raw = data.row.raw[0];
+                    const text = raw && raw.content ? raw.content : data.cell.text[0];
+                    if (text) {
+                        const prevSize = doc.getFontSize();
+                        doc.setFontSize(7);
+                        const xCenter = data.cell.x + data.cell.width / 2;
+                        const x = xCenter + 5;
+                        const yCenter = data.cell.y + data.cell.height / 2;
+                        const ptToMm = 0.3528;
+                        const offset = (doc.getFontSize() * ptToMm) * 0.5;
+                        const y = yCenter + offset;
+                        doc.setTextColor(0);
+                        doc.text(text, x, y, { align: 'center', angle: 90 });
+                        doc.setFontSize(prevSize);
+                    }
+                }
+            }
+        });
+    });
+
+    doc.save(`horario_turno_qtd_turmas_${turno.toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`);
+    mostrarToast('PDF por número de turmas gerado com sucesso!');
+}
+
 function gerarRelatorioTurnoXLS() {
     if (typeof XLSX === 'undefined') {
         mostrarToast('Biblioteca XLSX não carregada. Verifique sua conexão.', 'error');
@@ -5243,9 +6308,7 @@ function gerarRelatorioTurnoXLS() {
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
                         const nomeDisc = apelidarDisciplina(aula.disciplina || '');
-                        row.push(
-                            `${nomeDisc}${prof ? ' - ' + prof.nome : ''}`
-                        );
+                        row.push(`${nomeDisc}${prof ? ' - ' + prof.nome : ''}`);
                     }
                 });
             }
@@ -5277,7 +6340,9 @@ function gerarRelatorioTurnoXLS() {
     ws['!merges'] = merges;
     const headDiaAddr = XLSX.utils.encode_cell({ r: 0, c: 0 });
     if (ws[headDiaAddr]) {
-        ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
+        ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, {
+            alignment: { horizontal: 'center', vertical: 'center', textRotation: 0 }
+        });
     }
     
     if (layout === 'colorido') {
@@ -5316,8 +6381,24 @@ function gerarRelatorioTurnoXLS() {
             idxDiaPlanilha2++;
         });
     }
-
+    
     const totalCols = 2 + turmasTurno.length;
+
+    for (let c = 0; c < totalCols; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (ws[addr]) {
+            const prev = ws[addr].s || {};
+            const prevAlignment = prev.alignment || {};
+            ws[addr].s = Object.assign({}, prev, {
+                alignment: Object.assign({}, prevAlignment, {
+                    horizontal: 'center',
+                    vertical: 'center',
+                    wrapText: true
+                })
+            });
+        }
+    }
+
     let idxDiaBorda = 0;
     DIAS_SEMANA.forEach((d) => {
         if (omitirSabado && d === 'SABADO') return;
@@ -5329,7 +6410,7 @@ function gerarRelatorioTurnoXLS() {
                 const prevBorder = prev.border || {};
                 ws[addr].s = Object.assign({}, prev, {
                     border: Object.assign({}, prevBorder, {
-                        bottom: { style: 'medium', color: { rgb: 'FF000000' } }
+                        bottom: { style: 'thick', color: { rgb: 'FF000000' } }
                     })
                 });
             }
@@ -5351,6 +6432,8 @@ function gerarRelatorioCursoPDF() {
     const turno = document.getElementById('turnoRelatorioCurso').value;
     const layoutSel = document.getElementById('layoutRelatorioCurso');
     const layout = layoutSel ? layoutSel.value : 'compacto';
+    const chkContrasteCurso = document.getElementById('contrastePdfCurso');
+    const usarContrastePdfCurso = chkContrasteCurso ? !!chkContrasteCurso.checked : true;
 
     if (!cursosSelecionados.length) {
         mostrarToast('Selecione ao menos um curso.', 'warning');
@@ -5417,7 +6500,7 @@ function gerarRelatorioCursoPDF() {
                         row.push('-');
                     } else {
                         const prof = professores.find(p => p.id === aula.professorId);
-                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '');
+                        const nomeDisciplina = apelidarDisciplina(aula.disciplina || '').toUpperCase();
                         const nomeProfessor = prof ? prof.nome : '';
                         const textoCelula = nomeProfessor ? `${nomeDisciplina}\n${nomeProfessor}` : nomeDisciplina;
                         if (layout === 'colorido' && prof && prof.cor) {
@@ -5425,7 +6508,12 @@ function gerarRelatorioCursoPDF() {
                             if (rgb) {
                                 row.push({
                                     content: textoCelula,
-                                    styles: { fillColor: [rgb.r, rgb.g, rgb.b], textColor: 255, valign: 'middle', halign: 'center' }
+                                    styles: {
+                                        fillColor: [rgb.r, rgb.g, rgb.b],
+                                        textColor: usarContrastePdfCurso ? getPdfTextColor(prof.cor) : 255,
+                                        valign: 'middle',
+                                        halign: 'center'
+                                    }
                                 });
                             } else {
                                 row.push(textoCelula);
@@ -5453,7 +6541,12 @@ function gerarRelatorioCursoPDF() {
         }
     });
 
-    const bodyFont = colCount > 12 ? 8 : 7;
+    let bodyFont = 10;
+    if (colCount > 16) {
+        bodyFont = 8;
+    } else if (colCount > 12) {
+        bodyFont = 9;
+    }
     doc.autoTable({
         head,
         body,
@@ -5465,7 +6558,7 @@ function gerarRelatorioCursoPDF() {
             valign: 'middle',
             halign: 'center'
         },
-        margin: { top: 6, right: 6, bottom: 6, left: 6 },
+        margin: { top: 0, right: 0, bottom: 0, left: 0 },
         headStyles: {
             fillColor: [231, 76, 60],
             textColor: 255,
@@ -5563,14 +6656,14 @@ function gerarRelatorioCursoXLS() {
                     turmasCurso.forEach(() => row.push('INTERVALO'));
                 } else {
                     turmasCurso.forEach(turma => {
-                    const aula = obterAula(turno, dia, turma.id, tempo.id);
-                    if (!aula) {
-                        row.push('');
-                    } else {
-                        const prof = professores.find(p => p.id === aula.professorId);
-                        const nomeDisc = apelidarDisciplina(aula.disciplina || '');
-                        row.push(`${nomeDisc}${prof ? ' - ' + prof.nome : ''}`);
-                    }
+                        const aula = obterAula(turno, dia, turma.id, tempo.id);
+                        if (!aula) {
+                            row.push('');
+                        } else {
+                            const prof = professores.find(p => p.id === aula.professorId);
+                            const nomeDisc = apelidarDisciplina(aula.disciplina || '');
+                            row.push(`${nomeDisc}${prof ? ' - ' + prof.nome : ''}`);
+                        }
                     });
                 }
 
@@ -5596,7 +6689,9 @@ function gerarRelatorioCursoXLS() {
         ws['!merges'] = merges;
         const headDiaAddr = XLSX.utils.encode_cell({ r: 0, c: 0 });
         if (ws[headDiaAddr]) {
-            ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, { alignment: { horizontal: 'center', vertical: 'center', textRotation: 90 } });
+            ws[headDiaAddr].s = Object.assign({}, ws[headDiaAddr].s || {}, {
+                alignment: { horizontal: 'center', vertical: 'center', textRotation: 0 }
+            });
         }
 
         if (layout === 'colorido') {
@@ -5634,6 +6729,22 @@ function gerarRelatorioCursoXLS() {
         }
 
         const totalCols = 2 + turmasCurso.length;
+
+        for (let c = 0; c < totalCols; c++) {
+            const addr = XLSX.utils.encode_cell({ r: 0, c });
+            if (ws[addr]) {
+                const prev = ws[addr].s || {};
+                const prevAlignment = prev.alignment || {};
+                ws[addr].s = Object.assign({}, prev, {
+                    alignment: Object.assign({}, prevAlignment, {
+                        horizontal: 'center',
+                        vertical: 'center',
+                        wrapText: true
+                    })
+                });
+            }
+        }
+
         DIAS_SEMANA.forEach((d, idxDia) => {
             const r1 = 1 + idxDia * rowsPerDia + rowsPerDia - 1;
             for (let c = 0; c < totalCols; c++) {
@@ -5643,7 +6754,7 @@ function gerarRelatorioCursoXLS() {
                     const prevBorder = prev.border || {};
                     ws[addr].s = Object.assign({}, prev, {
                         border: Object.assign({}, prevBorder, {
-                            bottom: { style: 'medium', color: { rgb: 'FF000000' } }
+                            bottom: { style: 'thick', color: { rgb: 'FF000000' } }
                         })
                     });
                 }
@@ -7013,6 +8124,20 @@ function hexToRgb(hex) {
     } : null;
 }
 
+function getContrastingTextColor(hex) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return '#000000';
+    const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+    return brightness > 180 ? '#000000' : '#ffffff';
+}
+
+function getPdfTextColor(hex) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return 0;
+    const brightness = (rgb.r * 299 + rgb.g * 587 + rgb.b * 114) / 1000;
+    return brightness > 180 ? 0 : 255;
+}
+
 // =======================
 // CONSULTAS - ATUALIZADO
 // =======================
@@ -7662,8 +8787,10 @@ function exportarBackup() {
         aulas,
         cursos,
         temposPorTurno: TEMPOS_POR_TURNO,
+        apelidosDisciplinas,
+        ordemTurmasPorTurno: ORDEM_TURMAS_POR_TURNO,
         exportadoEm: new Date().toISOString(),
-        versao: '1.1'
+        versao: '1.2'
     };
     
     const blob = new Blob([JSON.stringify(dados, null, 2)], { type: 'application/json' });
@@ -7706,8 +8833,18 @@ function importarBackup(event) {
             if (!cursos.includes(CURSO_TEMPO_INTEGRAL)) {
                 cursos.push(CURSO_TEMPO_INTEGRAL);
             }
-            if (dados.temposPorTurno) {
+            if (dados.temposPorTurno && typeof dados.temposPorTurno === 'object') {
                 TEMPOS_POR_TURNO = dados.temposPorTurno;
+            }
+            if (dados.apelidosDisciplinas && typeof dados.apelidosDisciplinas === 'object') {
+                apelidosDisciplinas = dados.apelidosDisciplinas;
+            } else {
+                apelidosDisciplinas = {};
+            }
+            if (dados.ordemTurmasPorTurno && typeof dados.ordemTurmasPorTurno === 'object') {
+                ORDEM_TURMAS_POR_TURNO = dados.ordemTurmasPorTurno;
+            } else {
+                ORDEM_TURMAS_POR_TURNO = {};
             }
             
             salvarLocal();
@@ -7857,6 +8994,28 @@ document.addEventListener('DOMContentLoaded', () => {
         onChangeTipoConsulta();
     }
 
+    const selDisciplinaApelido = document.getElementById('disciplinaApelidoSelect');
+    if (selDisciplinaApelido) {
+        selDisciplinaApelido.addEventListener('change', () => {
+            const inputApelido = document.getElementById('apelidoDisciplinaInput');
+            const chkRemover = document.getElementById('removerApelidoDisciplinaCheckbox');
+            if (chkRemover) {
+                chkRemover.checked = false;
+            }
+            if (inputApelido) {
+                inputApelido.disabled = false;
+                const discSel = selDisciplinaApelido.value;
+                let valor = '';
+                if (discSel && apelidosDisciplinas[discSel]) {
+                    valor = apelidosDisciplinas[discSel];
+                } else if (discSel) {
+                    valor = sugerirApelidoDisciplina(discSel);
+                }
+                inputApelido.value = valor;
+            }
+        });
+    }
+
     const rapidoTurno = document.getElementById('rapidoTurno');
     if (rapidoTurno) {
         rapidoTurno.addEventListener('change', () => {
@@ -7897,11 +9056,33 @@ document.addEventListener('DOMContentLoaded', () => {
         selectProfModal.addEventListener('change', function() {
             const profId = this.value;
             const disciplinaInput = document.getElementById('modalDisciplina');
-            if (profId && disciplinaInput) {
+            const apelidoInput = document.getElementById('modalApelidoDisciplina');
+            if (!disciplinaInput) {
+                return;
+            }
+            if (apelidoInput) {
+                delete apelidoInput.dataset.manual;
+            }
+            if (profId) {
                 const prof = professores.find(p => p.id === profId);
-                if (prof && prof.disciplinas && prof.disciplinas.length > 0) {
-                    disciplinaInput.value = prof.disciplinas[0];
+                if (prof && Array.isArray(prof.disciplinas) && prof.disciplinas.length > 0) {
+                    const nomeDisc = prof.disciplinas[0];
+                    disciplinaInput.value = nomeDisc;
+                    if (apelidoInput) {
+                        let valor = '';
+                        if (nomeDisc && Object.prototype.hasOwnProperty.call(apelidosDisciplinas, nomeDisc)) {
+                            valor = apelidosDisciplinas[nomeDisc] || '';
+                        } else if (nomeDisc.length > 10) {
+                            valor = sugerirApelidoDisciplina(nomeDisc);
+                        }
+                        apelidoInput.value = valor;
+                    }
+                    return;
                 }
+            }
+            disciplinaInput.value = '';
+            if (apelidoInput) {
+                apelidoInput.value = '';
             }
         });
     }
