@@ -77,6 +77,10 @@
         </div>
         <form id="formLogin" class="form-grid">
             <div class="form-group">
+                <label for="codigoEscolaLogin">Código da escola</label>
+                <input type="text" id="codigoEscolaLogin" autocomplete="organization" placeholder="ex.: ESC001">
+            </div>
+            <div class="form-group">
                 <label for="loginUsuario">Usuário</label>
                 <input type="text" id="loginUsuario" autocomplete="username" placeholder="ex.: admin-escola">
             </div>
@@ -93,18 +97,113 @@
 
     <div class="main-content">
         <nav class="sidebar">
-            <button class="menu-btn active" onclick="showSection('professores')">👨‍🏫 Professores</button>
+            <button class="menu-btn active" onclick="showSection('dashboard')">📊 Dashboard</button>
+            <button class="menu-btn" onclick="showSection('professores')">👨‍🏫 Professores</button>
             <button class="menu-btn" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
             <button class="menu-btn" onclick="showSection('horarios')">📅 Editor de Horários</button>
-            <button class="menu-btn" onclick="showSection('relatorios')">📄 Relatórios e Horários</button>
+            <button class="menu-btn" onclick="showSection('relatorios')">📄 Horários</button>
             <button class="menu-btn" onclick="showSection('consultas')">🔎 Consultas</button>
             <button class="menu-btn" onclick="sairSistema()">🚪 Sair</button>
         </nav>
 
         <main class="content">
+            <section id="dashboard" class="section active">
+                <div class="card">
+                    <div class="dashboard-top">
+                        <h3>Visão Geral</h3>
+                        <label class="theme-toggle" for="toggleTemaEscuro">
+                            <input type="checkbox" id="toggleTemaEscuro">
+                            <span class="theme-toggle-slider"></span>
+                            <span class="theme-toggle-label" id="toggleTemaLabel">Tema claro</span>
+                        </label>
+                    </div>
+                    <div class="dashboard-kpis">
+                        <div class="dashboard-kpi kpi-aulas">
+                            <span class="kpi-label">Aulas lançadas</span>
+                            <strong class="kpi-value" id="dashboardTotalAulas">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-professores">
+                            <span class="kpi-label">Professores</span>
+                            <strong class="kpi-value" id="dashboardTotalProfessores">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-turmas">
+                            <span class="kpi-label">Turmas</span>
+                            <strong class="kpi-value" id="dashboardTotalTurmas">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-cursos">
+                            <span class="kpi-label">Cursos / Áreas</span>
+                            <strong class="kpi-value" id="dashboardTotalCursos">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-sem-prof">
+                            <span class="kpi-label">Aulas sem professor</span>
+                            <strong class="kpi-value" id="dashboardAulasSemProfessor">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-conflitos">
+                            <span class="kpi-label">Possíveis conflitos</span>
+                            <strong class="kpi-value" id="dashboardConflitos">0</strong>
+                        </div>
+                        <div class="dashboard-kpi kpi-coordenadores">
+                            <span class="kpi-label">Coordenadores de área/Laboratório</span>
+                            <strong class="kpi-value" id="dashboardTotalCoordenadores">0</strong>
+                        </div>
+                    </div>
+                </div>
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <h3>Aulas por turno</h3>
+                        <canvas id="dashChartTurnos"></canvas>
+                    </div>
+                    <div class="card">
+                        <h3>Aulas por dia da semana</h3>
+                        <canvas id="dashChartDias"></canvas>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Pendências de lançamento</h3>
+                    <p class="hint" id="dashboardPendenciasResumo"></p>
+                    <div class="dashboard-lists">
+                        <div>
+                            <h4>Turmas sem aula lançada</h4>
+                            <table class="tabela-padrao">
+                                <thead>
+                                <tr>
+                                    <th>Turma</th>
+                                    <th>Turno</th>
+                                </tr>
+                                </thead>
+                                <tbody id="dashboardTurmasSemAula"></tbody>
+                            </table>
+                        </div>
+                        <div>
+                            <h4>Professores sem aulas</h4>
+                            <table class="tabela-padrao">
+                                <thead>
+                                <tr>
+                                    <th>Professor</th>
+                                    <th>Base</th>
+                                </tr>
+                                </thead>
+                                <tbody id="dashboardProfessoresSemAula"></tbody>
+                            </table>
+                        </div>
+                        <div>
+                            <h4>Professores coordenadores</h4>
+                            <table class="tabela-padrao">
+                                <thead>
+                                <tr>
+                                    <th>Professor</th>
+                                    <th>Área / Curso / Laboratório</th>
+                                </tr>
+                                </thead>
+                                <tbody id="dashboardProfessoresCoordenadores"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             <!-- ================= PROFESSORES ================= -->
-            <section id="professores" class="section active">
+            <section id="professores" class="section">
                 <h2>Professores</h2>
 
                 <div class="card">
@@ -140,6 +239,17 @@
                                         onclick="selecionarChip('chips-base-prof','baseProfessor',this)">Base Comum</button>
                             </div>
                             <input type="hidden" id="baseProfessor">
+                        </div>
+                        <div class="form-group">
+                            <label style="display:inline-flex; align-items:center; gap:8px;">
+                                <input type="checkbox" id="coordenadorAreaProfessor">
+                                Professor é coordenador de área
+                            </label>
+                        </div>
+                        <div class="form-group" id="grupoAreaCoordenacaoProfessor" style="display:none;">
+                            <label for="areaCoordenacaoProfessor">Curso / Área de coordenação:</label>
+                            <input type="text" id="areaCoordenacaoProfessor" list="listaCursosAreaProfessor" placeholder="Selecione ou digite livremente">
+                            <datalist id="listaCursosAreaProfessor"></datalist>
                         </div>
                         <div class="form-group full-row">
                             <label>Disponibilidade por dia/turno:</label>
@@ -194,6 +304,7 @@
                             <th>Nome</th>
                             <th>Disciplinas</th>
                             <th>Base</th>
+                            <th>Coordenação</th>
                             <th>Cor</th>
                             <th>Ações</th>
                         </tr>
@@ -423,7 +534,7 @@
                                 Melhorar contraste das letras
                             </label>
                         </div>
-                        <div class="filtros-grade-group">
+                        <div class="filtros-grade-group" id="filtro-usar-ia">
                             <label style="display:inline-flex; align-items:center; gap:4px;">
                                 <input type="checkbox" id="chkUsarIaNoAjuste">
                                 Usar IA no Ajuste
@@ -436,13 +547,16 @@
                         <button type="button" class="btn-secondary" onclick="verificarConflitosTurno()">🔍 Verificar Conflitos</button>
                         <button type="button" class="btn-secondary" id="btnDesfazerTurno" onclick="desfazerAjuste()">↩️ Desfazer</button>
                         <button type="button" class="btn-secondary" id="btnRefazerTurno" onclick="refazerAjuste()">↪️ Refazer</button>
-                        <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Backup</button>
+                        <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Dados</button>
                         <input type="file" id="importBackup" accept=".json" style="display: none;" onchange="importarBackup(event)">
-                        <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Backup</button>
+                        <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Dados</button>
+                        <button type="button" class="btn-secondary" id="btnRestaurarNuvem" onclick="restaurarDoPostgres()">🗄️ Restaurar da Nuvem</button>
                         <button type="button" class="btn-secondary" id="btnToggleInsercaoRapida" onclick="toggleInsercaoRapida()">
                             💡 Inserção rápida
                         </button>
                     </div>
+
+                    <div id="ajusteInteligenteStatus" class="hint"></div>
 
                     <div class="editor-quick-insert" id="editorQuickInsert" style="margin-top: 12px; display:none;">
                         <h3>Inserção rápida no Editor Visual</h3>
@@ -550,7 +664,7 @@
                             </div>
                         </div>
                         <p class="hint">
-                            Recomenda-se usar o botão <strong>Exportar Backup</strong> acima, antes de apagar horários, para manter um histórico do semestre anterior.
+                            Recomenda-se usar o botão <strong>Exportar Dados</strong> acima, antes de apagar horários, para manter um histórico do semestre anterior.
                         </p>
                     </div>
                 </div>
@@ -634,11 +748,16 @@
 
             <!-- ================= RELATÓRIOS / PDFs ================= -->
             <section id="relatorios" class="section">
-                <h2>Relatórios e Horários em PDFs</h2>
+                <h2>Horários em PDFs</h2>
 
                 <div class="card">
                     <div class="card-header-inline" onclick="cardHeaderToggleClick(event)">
-                        <h3>Horário por Turno</h3>
+                        <h3>
+                            Horário por Turno
+                            <span id="avisoA3RelatorioTurno" class="aviso-a3-intermitente" style="display:none;">
+                                Horário grande: imprimir em A3
+                            </span>
+                        </h3>
                         <button type="button" class="btn-icon-toggle" id="btnToggleRelatorioTurno" onclick="toggleRelatorioTurno()">
                             ▼
                         </button>
@@ -793,7 +912,7 @@
                             </div>
                             <p class="hint">O PDF destacará somente a turma escolhida, com cores dos professores.</p>
                         </div>
-                        <div class="form-group full-row">
+                        <div class="form-group full-row" id="qrOpcoesGroup">
                             <label>Opções do PDF rápido:</label>
                             <div class="inline-group">
                                 <label><input type="checkbox" id="qrPdfColorido" checked> PDF colorido</label>
@@ -938,7 +1057,7 @@
                         <div class="form-group full-row">
                             <div class="inline-group">
                                 <button class="btn-primary" type="button" onclick="gerarConsulta()">🔎 Gerar Consulta</button>
-                                <button class="btn-secondary" type="button" onclick="preverImpressaoConsulta()">🖨️ Pré-visualizar impressão</button>
+                                <button class="btn-pdf" type="button" onclick="gerarConsultaPDF()">📄 Gerar PDF da Consulta</button>
                             </div>
                         </div>
                     </div>
@@ -1104,6 +1223,17 @@
                             onclick="selecionarChip('chips-modal-base-prof','modalBaseProfessor',this)">Base Comum</button>
                 </div>
                 <input type="hidden" id="modalBaseProfessor">
+            </div>
+            <div class="form-group">
+                <label style="display:inline-flex; align-items:center; gap:8px;">
+                    <input type="checkbox" id="modalCoordenadorAreaProfessor">
+                    Professor é coordenador de área
+                </label>
+            </div>
+            <div class="form-group" id="modalGrupoAreaCoordenacaoProfessor" style="display:none;">
+                <label for="modalAreaCoordenacaoProfessor">Curso / Área de coordenação:</label>
+                <input type="text" id="modalAreaCoordenacaoProfessor" list="modalListaCursosAreaProfessor" placeholder="Selecione ou digite livremente">
+                <datalist id="modalListaCursosAreaProfessor"></datalist>
             </div>
             <div class="form-group full-row">
                 <label>Disponibilidade por dia/turno</label>

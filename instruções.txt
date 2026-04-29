@@ -4,3 +4,10 @@ VisioHorário
 - https://github.com/VisioHorario → painel da conta no GitHub.
 - https://visiohorario.github.io/ → site/aplicação aberta para uso no navegador.
 
+
+Tenants e usuários de exemplo já cadastrados
+- ESC001 e ESC002
+- Em cada um deles:
+  - admin / admin
+  - admin123 / admin123
+

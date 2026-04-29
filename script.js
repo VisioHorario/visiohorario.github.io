@@ -4,6 +4,11 @@
 
 // Prefixo para localStorage (evita conflito entre aplicações)
 const APP_PREFIX = 'horarios_escola_';
+const CHAVE_TEMA = `${APP_PREFIX}tema`;
+const EM_AMBIENTE_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const BACKEND_IA_URL = window.VISIO_IA_URL
+    || (EM_AMBIENTE_LOCAL ? 'http://localhost:3001' : `${window.location.origin}/api`);
+const PERSISTENCIA_PG_ATIVA = true;
 
 // Dias e turnos
 const DIAS_SEMANA = ['SEGUNDA', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SABADO'];
@@ -79,17 +84,48 @@ const ROLES = {
     COORD_TURNO: 'COORD_TURNO'
 };
 
+const TENANTS_FIXOS = [
+    { id: 'esc001', codigo: 'ESC001', nome: 'Escola 001' },
+    { id: 'esc002', codigo: 'ESC002', nome: 'Escola 002' }
+];
+
 const USUARIOS_FIXOS = [
     {
-        id: 'admin',
-        nome: 'Administrador da Escola',
+        id: 'esc001_admin_basico',
+        nome: 'Administrador',
         login: 'admin',
         senha: 'admin',
-        role: ROLES.ADMIN
+        role: ROLES.ADMIN,
+        tenantId: 'esc001'
+    },
+    {
+        id: 'esc001_admin_completo',
+        nome: 'Administrador Completo',
+        login: 'admin123',
+        senha: 'admin123',
+        role: ROLES.ADMIN,
+        tenantId: 'esc001'
+    },
+    {
+        id: 'esc002_admin_basico',
+        nome: 'Administrador',
+        login: 'admin',
+        senha: 'admin',
+        role: ROLES.ADMIN,
+        tenantId: 'esc002'
+    },
+    {
+        id: 'esc002_admin_completo',
+        nome: 'Administrador Completo',
+        login: 'admin123',
+        senha: 'admin123',
+        role: ROLES.ADMIN,
+        tenantId: 'esc002'
     }
 ];
 
 let usuarioLogado = null;
+let tenantAtual = null;
 
 let turnoAtualGrade = 'MANHA';
 let modoVisualGrade = 'TURNO';
@@ -103,8 +139,22 @@ let aulaEmEdicao = null;
 let chartProfDias = null;
 let chartProfTurnos = null;
 let chartProfDiasMes = null;
+let chartDashboardTurnos = null;
+let chartDashboardDias = null;
 
 const PALETA_GRAFICOS = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#e67e22'];
+
+const PARAMS_INICIAIS = new URLSearchParams(window.location.search || '');
+const QRCODE_MODO_RESTRITO = (() => {
+    const hasProfShort = PARAMS_INICIAIS.has('p');
+    const hasTurmaShort = PARAMS_INICIAIS.has('t');
+    const ativo = PARAMS_INICIAIS.get('qr') === '1'
+        || PARAMS_INICIAIS.get('modo') === 'qr'
+        || hasProfShort
+        || hasTurmaShort;
+    const alvo = PARAMS_INICIAIS.get('alvo') || (hasProfShort ? 'prof' : hasTurmaShort ? 'turma' : '');
+    return { ativo, alvo };
+})();
 
 
 // Cache para otimização
@@ -844,16 +894,39 @@ function mostrarToast(mensagem, tipo = 'success') {
 
 // banner removido
 // LocalStorage
+function obterChaveStorageTenant(sufixo) {
+    if (!tenantAtual || !tenantAtual.id) return null;
+    return `${APP_PREFIX}${tenantAtual.id}_${sufixo}`;
+}
+
+function resetarDadosEmMemoria() {
+    professores = [];
+    turmas = [];
+    aulas = [];
+    cursos = ['Informática', 'Administração', 'Enfermagem'];
+    if (!cursos.includes(CURSO_TEMPO_INTEGRAL)) {
+        cursos.push(CURSO_TEMPO_INTEGRAL);
+    }
+    apelidosDisciplinas = {};
+    ORDEM_TURMAS_POR_TURNO = {};
+}
+
 function salvarLocal() {
+    const keyProf = obterChaveStorageTenant('professores');
+    if (!keyProf) {
+        return;
+    }
     try {
-        localStorage.setItem(`${APP_PREFIX}professores`, JSON.stringify(professores));
-        localStorage.setItem(`${APP_PREFIX}turmas`, JSON.stringify(turmas));
-        localStorage.setItem(`${APP_PREFIX}aulas`, JSON.stringify(aulas));
-        localStorage.setItem(`${APP_PREFIX}cursos`, JSON.stringify(cursos));
-        localStorage.setItem(`${APP_PREFIX}tempos_por_turno`, JSON.stringify(TEMPOS_POR_TURNO));
-        localStorage.setItem(`${APP_PREFIX}apelidos_disciplinas`, JSON.stringify(apelidosDisciplinas));
-        localStorage.setItem(`${APP_PREFIX}ordem_turmas_turno`, JSON.stringify(ORDEM_TURMAS_POR_TURNO));
+        localStorage.setItem(keyProf, JSON.stringify(professores));
+        localStorage.setItem(obterChaveStorageTenant('turmas'), JSON.stringify(turmas));
+        localStorage.setItem(obterChaveStorageTenant('aulas'), JSON.stringify(aulas));
+        localStorage.setItem(obterChaveStorageTenant('cursos'), JSON.stringify(cursos));
+        localStorage.setItem(obterChaveStorageTenant('tempos_por_turno'), JSON.stringify(TEMPOS_POR_TURNO));
+        localStorage.setItem(obterChaveStorageTenant('apelidos_disciplinas'), JSON.stringify(apelidosDisciplinas));
+        localStorage.setItem(obterChaveStorageTenant('ordem_turmas_turno'), JSON.stringify(ORDEM_TURMAS_POR_TURNO));
         dadosModificados = true;
+        agendarPersistenciaPostgres();
+        atualizarDashboardRapidoSeVisivel();
         mostrarToast('Dados salvos com sucesso!');
     } catch (e) {
         console.warn('Não foi possível salvar no localStorage', e);
@@ -862,14 +935,19 @@ function salvarLocal() {
 }
 
 function carregarLocal() {
+    resetarDadosEmMemoria();
+    const keyProf = obterChaveStorageTenant('professores');
+    if (!keyProf) {
+        return;
+    }
     try {
-        const p = localStorage.getItem(`${APP_PREFIX}professores`);
-        const t = localStorage.getItem(`${APP_PREFIX}turmas`);
-        const a = localStorage.getItem(`${APP_PREFIX}aulas`);
-        const c = localStorage.getItem(`${APP_PREFIX}cursos`);
-        const tempos = localStorage.getItem(`${APP_PREFIX}tempos_por_turno`);
-        const ap = localStorage.getItem(`${APP_PREFIX}apelidos_disciplinas`);
-        const ordemTurmas = localStorage.getItem(`${APP_PREFIX}ordem_turmas_turno`);
+        const p = localStorage.getItem(keyProf);
+        const t = localStorage.getItem(obterChaveStorageTenant('turmas'));
+        const a = localStorage.getItem(obterChaveStorageTenant('aulas'));
+        const c = localStorage.getItem(obterChaveStorageTenant('cursos'));
+        const tempos = localStorage.getItem(obterChaveStorageTenant('tempos_por_turno'));
+        const ap = localStorage.getItem(obterChaveStorageTenant('apelidos_disciplinas'));
+        const ordemTurmas = localStorage.getItem(obterChaveStorageTenant('ordem_turmas_turno'));
         if (p) professores = JSON.parse(p);
         if (t) turmas = JSON.parse(t);
         if (a) aulas = JSON.parse(a);
@@ -1212,22 +1290,19 @@ function tentarMoverParaMelhorDia(aulasDisc, turno, turmaId, professorId, melhor
 }
 
 // Integrar a otimização no ajuste inteligente principal
-function ajusteInteligenteCompleto() {
+function executarAjusteInteligenteCompletoInterno() {
     const turno = turnoAtualGrade;
-    
+    capturarEstadoAulas();
+    ajusteInteligente();
+    otimizarAlocacaoDoisTempos(turno);
+    montarGradeTurno(turnoAtualGrade);
+}
+
+function ajusteInteligenteCompleto() {
     if (!confirm('O ajuste inteligente completo vai otimizar horários, priorizar alocações e melhorar distribuição de 2-tempos. Continuar?')) {
         return;
     }
-    
-    capturarEstadoAulas();
-    
-    // Executar o ajuste inteligente original
-    ajusteInteligente();
-    
-    // Aplicar otimização específica para 2-tempos
-    otimizarAlocacaoDoisTempos(turno);
-    
-    montarGradeTurno(turnoAtualGrade);
+    executarAjusteInteligenteCompletoInterno();
     mostrarToast('Ajuste inteligente completo aplicado com otimizações!');
 }
 
@@ -1683,7 +1758,7 @@ function gerarRelatorioFalhasInsercaoRapidaPlanilha(gruposFalha, ignoradas, grup
         startY: y + 2,
         theme: 'grid',
         styles: {
-            fontSize: 8,
+            fontSize: 10,
             cellPadding: 2,
             valign: 'top'
         },
@@ -1708,8 +1783,28 @@ function gerarRelatorioFalhasInsercaoRapidaPlanilha(gruposFalha, ignoradas, grup
 // NAVEGAÇÃO ENTRE SEÇÕES
 // =======================
 
-function autenticarUsuario(login, senha) {
-    return USUARIOS_FIXOS.find(u => u.login === login && u.senha === senha) || null;
+function normalizarCodigoEscola(codigo) {
+    return String(codigo || '').trim().toUpperCase();
+}
+
+function obterTenantPorCodigo(codigoEscola) {
+    const codigo = normalizarCodigoEscola(codigoEscola);
+    if (!codigo) return null;
+    return TENANTS_FIXOS.find(t => t.codigo === codigo) || null;
+}
+
+function autenticarUsuario(codigoEscola, login, senha) {
+    const tenant = obterTenantPorCodigo(codigoEscola);
+    if (!tenant) return null;
+    const usuario = USUARIOS_FIXOS.find(
+        u => u.tenantId === tenant.id && u.login === login && u.senha === senha
+    ) || null;
+    if (!usuario) return null;
+    return { usuario, tenant };
+}
+
+function usuarioTemAcessoCompleto() {
+    return !!(usuarioLogado && /admin_completo$/i.test(usuarioLogado.id));
 }
 
 function aplicarPermissoesNaUI() {
@@ -1733,6 +1828,19 @@ function aplicarPermissoesNaUI() {
     const charts = document.querySelector('.prof-charts');
     const turnoRel = document.getElementById('turnoRelatorio');
     const turnoRelCurso = document.getElementById('turnoRelatorioCurso');
+    const blocoUsarIa = document.getElementById('filtro-usar-ia');
+    const chkUsarIa = document.getElementById('chkUsarIaNoAjuste');
+    const btnRestaurarNuvem = document.getElementById('btnRestaurarNuvem');
+    const acessoCompleto = usuarioTemAcessoCompleto();
+    if (blocoUsarIa) {
+        blocoUsarIa.style.display = acessoCompleto ? '' : 'none';
+    }
+    if (chkUsarIa && !acessoCompleto) {
+        chkUsarIa.checked = false;
+    }
+    if (btnRestaurarNuvem) {
+        btnRestaurarNuvem.style.display = acessoCompleto ? '' : 'none';
+    }
     if (usuarioLogado.role === ROLES.ADMIN) {
         if (btnConsultas) btnConsultas.style.display = '';
         if (blocoTempoVago) blocoTempoVago.style.display = '';
@@ -1783,8 +1891,21 @@ function atualizarInfoQtdTurmasTurnoNumero() {
     span.textContent = `(${qtd} ${sufixo})`;
 }
 
+function atualizarAvisoA3RelatorioTurno() {
+    const sel = document.getElementById('turnoRelatorio');
+    const aviso = document.getElementById('avisoA3RelatorioTurno');
+    if (!sel || !aviso) return;
+    const turno = sel.value;
+    const qtdTurmasTurno = turmas.filter(t => t.turno === turno).length;
+    // Mesma regra de geração do PDF: colCount > 12 (DIA + HORARIO + turmas)
+    const precisaA3 = (2 + qtdTurmasTurno) > 12;
+    aviso.style.display = precisaA3 ? 'inline-flex' : 'none';
+}
+
 function sairSistema() {
     usuarioLogado = null;
+    tenantAtual = null;
+    resetarDadosEmMemoria();
     try {
         localStorage.removeItem('usuarioAtual');
     } catch (e) {
@@ -1792,6 +1913,7 @@ function sairSistema() {
     const loginCard = document.getElementById('loginCard');
     const mainContent = document.querySelector('.main-content');
     const loginHint = document.getElementById('loginHint');
+    const inputCodigoEscola = document.getElementById('codigoEscolaLogin');
     const inputLogin = document.getElementById('loginUsuario');
     const inputSenha = document.getElementById('senhaUsuario');
     if (mainContent) {
@@ -1803,6 +1925,9 @@ function sairSistema() {
     if (loginHint) {
         loginHint.textContent = '';
     }
+    if (inputCodigoEscola) {
+        inputCodigoEscola.value = '';
+    }
     if (inputLogin) {
         inputLogin.value = '';
     }
@@ -1812,7 +1937,34 @@ function sairSistema() {
     aplicarPermissoesNaUI();
 }
 
+function atualizarUIAposCargaTenant() {
+    preencherSelectCursos();
+    preencherListasCursosCoordProfessores();
+    atualizarVisibilidadeCoordProfessor();
+    atualizarVisibilidadeCoordProfessorModal();
+    preencherSelectCursoVisual();
+    atualizarListaProfessores();
+    atualizarListaTurmas();
+    preencherSelectDisciplinasApelido();
+    atualizarChipsTempos();
+    montarGradeTurno(turnoAtualGrade);
+    preencherSelectCursoRelatorio();
+    preencherSelectProfessorRelatorio();
+    atualizarSelectTurmasInsercaoRapida();
+    atualizarInfoQtdTurmasTurnoNumero();
+    atualizarAvisoA3RelatorioTurno();
+    atualizarDashboardRapidoSeVisivel();
+}
+
+function carregarDadosTenantAtual() {
+    resetarDadosEmMemoria();
+    atualizarUIAposCargaTenant();
+}
+
 function showSection(id) {
+    if (QRCODE_MODO_RESTRITO.ativo && id !== 'relatorios') {
+        return;
+    }
     document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
     document.getElementById(id).classList.add('active');
 
@@ -1829,6 +1981,194 @@ function showSection(id) {
     }
     if (id === 'horarios') {
         mostrarHintEditorTurno();
+    }
+    if (id === 'dashboard') {
+        renderDashboardRapido();
+    }
+}
+
+function atualizarDashboardRapidoSeVisivel() {
+    const sec = document.getElementById('dashboard');
+    if (!sec || !sec.classList.contains('active')) {
+        return;
+    }
+    renderDashboardRapido();
+}
+
+function contarAulasPorTurno() {
+    const mapaTurmas = new Map((turmas || []).map(t => [t.id, t]));
+    const base = { MANHA: 0, TARDE: 0, NOITE: 0 };
+    (aulas || []).forEach(a => {
+        const turno = a.turno || mapaTurmas.get(a.turmaId)?.turno;
+        if (turno && base[turno] != null) {
+            base[turno] += 1;
+        }
+    });
+    return base;
+}
+
+function contarAulasPorDia() {
+    const ordem = ['SEGUNDA', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SABADO'];
+    const base = { SEGUNDA: 0, TERCA: 0, QUARTA: 0, QUINTA: 0, SEXTA: 0, SABADO: 0 };
+    (aulas || []).forEach(a => {
+        if (a.dia && base[a.dia] != null) {
+            base[a.dia] += 1;
+        }
+    });
+    return ordem.map(k => ({ dia: k, valor: base[k] || 0 }));
+}
+
+function calcularConflitosRapidos() {
+    const set = new Set();
+    let conflitos = 0;
+    (aulas || []).forEach(a => {
+        const chave = `${a.turno || ''}|${a.dia || ''}|${a.turmaId || ''}|${a.tempoId || ''}`;
+        if (set.has(chave)) {
+            conflitos += 1;
+        } else {
+            set.add(chave);
+        }
+    });
+    return conflitos;
+}
+
+function listarTurmasSemAula(limite = 8) {
+    const turmaComAula = new Set((aulas || []).map(a => a.turmaId).filter(Boolean));
+    return (turmas || [])
+        .filter(t => !turmaComAula.has(t.id))
+        .slice(0, limite)
+        .map(t => ({ nome: t.nome, turno: textoTurno(t.turno || '') }));
+}
+
+function listarProfessoresSemAula(limite = 8) {
+    const profComAula = new Set((aulas || []).map(a => a.professorId).filter(Boolean));
+    return (professores || [])
+        .filter(p => !profComAula.has(p.id))
+        .slice(0, limite)
+        .map(p => ({ nome: p.nome, base: p.base === 'COMUM' ? 'Base Comum' : 'Base Técnica' }));
+}
+
+function listarCoordenadoresArea(limite = 8) {
+    return (professores || [])
+        .filter(p => p.coordenadorArea)
+        .sort((a, b) => (a.nome || '').localeCompare(b.nome || '', 'pt-BR', { sensitivity: 'base' }))
+        .slice(0, limite)
+        .map(p => ({
+            nome: p.nome,
+            area: (p.areaCoordenacao || '').trim() || 'Área não informada'
+        }));
+}
+
+function preencherTabelaPendenciasDashboard(tbodyId, lista, vazioTexto, montarLinha) {
+    const tbody = document.getElementById(tbodyId);
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    if (!lista.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td colspan="2">${vazioTexto}</td>`;
+        tbody.appendChild(tr);
+        return;
+    }
+    lista.forEach(item => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = montarLinha(item);
+        tbody.appendChild(tr);
+    });
+}
+
+function renderDashboardRapido() {
+    const totalAulas = Array.isArray(aulas) ? aulas.length : 0;
+    const totalProfessores = Array.isArray(professores) ? professores.length : 0;
+    const totalTurmas = Array.isArray(turmas) ? turmas.length : 0;
+    const totalCursos = Array.isArray(cursos) ? cursos.filter(c => c !== CURSO_TEMPO_INTEGRAL).length : 0;
+    const totalCoordenadores = (professores || []).filter(p => p.coordenadorArea).length;
+    const aulasSemProfessor = (aulas || []).filter(a => !a.professorId).length;
+    const conflitos = calcularConflitosRapidos();
+    const turnos = contarAulasPorTurno();
+    const dias = contarAulasPorDia();
+    const turmasSemAula = listarTurmasSemAula(8);
+    const professoresSemAula = listarProfessoresSemAula(8);
+    const coordenadoresArea = listarCoordenadoresArea(8);
+
+    const setText = (id, valor) => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = String(valor);
+    };
+    setText('dashboardTotalAulas', totalAulas);
+    setText('dashboardTotalProfessores', totalProfessores);
+    setText('dashboardTotalTurmas', totalTurmas);
+    setText('dashboardTotalCursos', totalCursos);
+    setText('dashboardAulasSemProfessor', aulasSemProfessor);
+    setText('dashboardConflitos', conflitos);
+    setText('dashboardTotalCoordenadores', totalCoordenadores);
+
+    preencherTabelaPendenciasDashboard(
+        'dashboardTurmasSemAula',
+        turmasSemAula,
+        'Todas as turmas possuem aulas lançadas.',
+        item => `<td>${item.nome}</td><td><strong>${item.turno || '-'}</strong></td>`
+    );
+    preencherTabelaPendenciasDashboard(
+        'dashboardProfessoresSemAula',
+        professoresSemAula,
+        'Todos os professores possuem aulas lançadas.',
+        item => `<td>${item.nome}</td><td>${item.base}</td>`
+    );
+    preencherTabelaPendenciasDashboard(
+        'dashboardProfessoresCoordenadores',
+        coordenadoresArea,
+        'Nenhum coordenador de área cadastrado.',
+        item => `<td>${item.nome}</td><td>${item.area}</td>`
+    );
+    const resumoPendencias = document.getElementById('dashboardPendenciasResumo');
+    if (resumoPendencias) {
+        resumoPendencias.textContent = `${turmasSemAula.length} turma(s) sem aula e ${professoresSemAula.length} professor(es) sem carga no momento.`;
+    }
+
+    const canvasTurnos = document.getElementById('dashChartTurnos');
+    if (canvasTurnos && typeof Chart !== 'undefined') {
+        if (chartDashboardTurnos) chartDashboardTurnos.destroy();
+        chartDashboardTurnos = new Chart(canvasTurnos, {
+            type: 'bar',
+            data: {
+                labels: ['Manhã', 'Tarde', 'Noite'],
+                datasets: [{
+                    label: 'Aulas',
+                    data: [turnos.MANHA, turnos.TARDE, turnos.NOITE],
+                    backgroundColor: ['#2f80ed', '#f2994a', '#9b51e0'],
+                    borderRadius: 8
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: { legend: { display: false } },
+                scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
+            }
+        });
+    }
+
+    const canvasDias = document.getElementById('dashChartDias');
+    if (canvasDias && typeof Chart !== 'undefined') {
+        if (chartDashboardDias) chartDashboardDias.destroy();
+        chartDashboardDias = new Chart(canvasDias, {
+            type: 'doughnut',
+            data: {
+                labels: dias.map(i => i.dia),
+                datasets: [{
+                    data: dias.map(i => i.valor),
+                    backgroundColor: ['#2f80ed', '#27ae60', '#f2c94c', '#eb5757', '#56ccf2', '#bb6bd9'],
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { position: 'bottom' }
+                }
+            }
+        });
     }
 }
 
@@ -2500,6 +2840,48 @@ function atualizarChipsTempos() {
 // PROFESSORES
 // =======================
 
+function preencherListaCursosCoordProfessor(datalistId) {
+    const lista = document.getElementById(datalistId);
+    if (!lista) return;
+    lista.innerHTML = '';
+    const itens = Array.from(new Set((cursos || []).filter(Boolean)))
+        .sort((a, b) => a.localeCompare(b, 'pt-BR', { sensitivity: 'base' }));
+    itens.forEach(nome => {
+        const opt = document.createElement('option');
+        opt.value = nome;
+        lista.appendChild(opt);
+    });
+}
+
+function preencherListasCursosCoordProfessores() {
+    preencherListaCursosCoordProfessor('listaCursosAreaProfessor');
+    preencherListaCursosCoordProfessor('modalListaCursosAreaProfessor');
+}
+
+function atualizarVisibilidadeCoordProfessor() {
+    const chk = document.getElementById('coordenadorAreaProfessor');
+    const grupo = document.getElementById('grupoAreaCoordenacaoProfessor');
+    const input = document.getElementById('areaCoordenacaoProfessor');
+    if (!chk || !grupo || !input) return;
+    grupo.style.display = chk.checked ? '' : 'none';
+    input.required = !!chk.checked;
+    if (!chk.checked) {
+        input.value = '';
+    }
+}
+
+function atualizarVisibilidadeCoordProfessorModal() {
+    const chk = document.getElementById('modalCoordenadorAreaProfessor');
+    const grupo = document.getElementById('modalGrupoAreaCoordenacaoProfessor');
+    const input = document.getElementById('modalAreaCoordenacaoProfessor');
+    if (!chk || !grupo || !input) return;
+    grupo.style.display = chk.checked ? '' : 'none';
+    input.required = !!chk.checked;
+    if (!chk.checked) {
+        input.value = '';
+    }
+}
+
 function atualizarListaProfessores() {
     const corpo = document.getElementById('listaProfessores');
     const selProf = document.getElementById('professorHorario');
@@ -2540,6 +2922,10 @@ function atualizarListaProfessores() {
         const base = p.baseTipo === 'COMUM' ? 'Base Comum' : 'Base Técnica';
         tdBase.textContent = base;
         tr.appendChild(tdBase);
+
+        const tdCoord = document.createElement('td');
+        tdCoord.textContent = p.coordenadorArea ? (p.areaCoordenacao || 'Sim') : 'Não';
+        tr.appendChild(tdCoord);
 
         const tdCor = document.createElement('td');
         const box = document.createElement('div');
@@ -2587,7 +2973,7 @@ function atualizarListaProfessores() {
         trEdit.id = `editProfRow-${p.id}`;
         trEdit.style.display = 'none';
         const tdEdit = document.createElement('td');
-        tdEdit.colSpan = 5;
+        tdEdit.colSpan = 6;
         const disciplinasGlobais = Array.from(new Set(professores.flatMap(px => px.disciplinas))).filter(Boolean);
         const optionsDisc = disciplinasGlobais.map(d => `<option value="${d}" ${p.disciplinas.includes(d) ? 'selected' : ''}>${d}</option>`).join('');
         tdEdit.innerHTML = `
@@ -2682,6 +3068,10 @@ function salvarProfessor(e) {
     const apelidoProfInput = document.getElementById('apelidoProfessorDisciplina');
     const cor = document.getElementById('corProfessor').value || '#3498db';
     const baseProfessor = document.getElementById('baseProfessor').value || 'TECNICA';
+    const coordenadorArea = !!document.getElementById('coordenadorAreaProfessor')?.checked;
+    const areaCoordenacao = coordenadorArea
+        ? (document.getElementById('areaCoordenacaoProfessor')?.value || '').trim()
+        : '';
     const dispDiaTurno = coletarDisponibilidade('dispProfessor');
     const temposDiaTurno = coletarTemposDisponibilidade('dispProfessor');
     const diasDisponiveis = Object.keys(dispDiaTurno).filter(d => (dispDiaTurno[d] || []).length > 0);
@@ -2698,6 +3088,10 @@ function salvarProfessor(e) {
 
     if (!nome) {
         mostrarToast('Informe o nome do professor.', 'warning');
+        return;
+    }
+    if (coordenadorArea && !areaCoordenacao) {
+        mostrarToast('Informe o curso/área de coordenação.', 'warning');
         return;
     }
 
@@ -2734,6 +3128,8 @@ function salvarProfessor(e) {
                 disciplinas,
                 cor,
                 baseTipo: baseProfessor,
+                coordenadorArea,
+                areaCoordenacao,
                 diasDisponiveis,
                 turnosDisponiveis,
                 disponibilidadePorDia: dispDiaTurno,
@@ -2774,6 +3170,8 @@ function salvarProfessor(e) {
             p.disciplinas = novoProf.disciplinas;
             p.cor = novoProf.cor;
             p.baseTipo = novoProf.baseTipo;
+            p.coordenadorArea = novoProf.coordenadorArea;
+            p.areaCoordenacao = novoProf.areaCoordenacao;
             p.diasDisponiveis = novoProf.diasDisponiveis;
             p.turnosDisponiveis = novoProf.turnosDisponiveis;
             p.disponibilidadePorDia = novoProf.disponibilidadePorDia;
@@ -2788,6 +3186,8 @@ function salvarProfessor(e) {
             disciplinas,
             cor,
             baseTipo: baseProfessor,
+            coordenadorArea,
+            areaCoordenacao,
             diasDisponiveis,
             turnosDisponiveis,
             disponibilidadePorDia: dispDiaTurno,
@@ -2806,6 +3206,9 @@ function salvarProfessor(e) {
         apelidoProfInput.value = '';
         delete apelidoProfInput.dataset.manual;
     }
+    const chkCoord = document.getElementById('coordenadorAreaProfessor');
+    if (chkCoord) chkCoord.checked = false;
+    atualizarVisibilidadeCoordProfessor();
 }
 
 function editarProfessor(id) {
@@ -2838,6 +3241,11 @@ function editarProfessor(id) {
             btnSelecionado.classList.add('selecionado');
         }
     }
+    const chkCoord = document.getElementById('coordenadorAreaProfessor');
+    const inputAreaCoord = document.getElementById('areaCoordenacaoProfessor');
+    if (chkCoord) chkCoord.checked = !!p.coordenadorArea;
+    if (inputAreaCoord) inputAreaCoord.value = p.areaCoordenacao || '';
+    atualizarVisibilidadeCoordProfessor();
     renderDisponibilidade('dispProfessor', p.disponibilidadePorDia || null, (p.diasDisponiveis || []), (p.turnosDisponiveis || []), p.temposPorDiaTurno || null);
 }
 
@@ -2925,6 +3333,7 @@ function preencherSelectCursos() {
         opt.textContent = curso;
         sel.appendChild(opt);
     });
+    preencherListasCursosCoordProfessores();
 }
 
 function preencherSelectCursoVisual() {
@@ -3349,6 +3758,7 @@ function atualizarListaTurmas() {
     montarGradeTurno(turnoAtualGrade);
     preencherSelectCursoRelatorio();
     preencherSelectTurmaConsulta();
+    atualizarAvisoA3RelatorioTurno();
 }
 
 function salvarTurma(e) {
@@ -4062,11 +4472,51 @@ function montarGradeTurno(turno) {
     tabela.appendChild(tbody);
 
     const thTurmaCols = Array.from(thead.querySelectorAll('th.turma-col'));
+    const idsVisiveis = thTurmaCols.map(th => th.dataset.turmaId).filter(Boolean);
     let dragSrcColIndex = null;
+    let dragSrcTurmaId = null;
+
+    const salvarOrdemTurmasDepoisArraste = (origemIndex, destinoIndex) => {
+        if (origemIndex == null || destinoIndex == null || origemIndex === destinoIndex) return;
+        const origemTurmaId = idsVisiveis[origemIndex];
+        if (!origemTurmaId) return;
+        const novaOrdemVisivel = [...idsVisiveis];
+        novaOrdemVisivel.splice(origemIndex, 1);
+        const indiceInsercao = destinoIndex;
+        novaOrdemVisivel.splice(indiceInsercao, 0, origemTurmaId);
+        const idsTurnoOrdenados = turmas
+            .filter(t => t.turno === turno)
+            .sort(compararTurmasPorCursoETipo)
+            .map(t => t.id);
+        const idsTurnoSet = new Set(idsTurnoOrdenados);
+        const ordemSalva = Array.isArray(ORDEM_TURMAS_POR_TURNO[turno]) ? ORDEM_TURMAS_POR_TURNO[turno] : [];
+        const ordemBase = ordemSalva.filter(id => idsTurnoSet.has(id));
+        idsTurnoOrdenados.forEach(id => {
+            if (!ordemBase.includes(id)) ordemBase.push(id);
+        });
+        const visiveisSet = new Set(idsVisiveis);
+        let cursor = 0;
+        const novaOrdemCompleta = ordemBase.map(id => {
+            if (visiveisSet.has(id)) {
+                const novoId = novaOrdemVisivel[cursor];
+                cursor += 1;
+                return novoId;
+            }
+            return id;
+        });
+        ORDEM_TURMAS_POR_TURNO[turno] = novaOrdemCompleta;
+        try {
+            const chaveOrdem = obterChaveStorageTenant('ordem_turmas_turno');
+            if (chaveOrdem) {
+                localStorage.setItem(chaveOrdem, JSON.stringify(ORDEM_TURMAS_POR_TURNO));
+            }
+        } catch (e) {}
+    };
 
     thTurmaCols.forEach(th => {
         th.addEventListener('dragstart', (ev) => {
             dragSrcColIndex = Array.from(th.parentElement.children).indexOf(th);
+            dragSrcTurmaId = th.dataset.turmaId || null;
             ev.dataTransfer.effectAllowed = 'move';
         });
         th.addEventListener('dragover', (ev) => {
@@ -4077,35 +4527,20 @@ function montarGradeTurno(turno) {
             ev.preventDefault();
             const destIndex = Array.from(th.parentElement.children).indexOf(th);
             if (dragSrcColIndex === null || dragSrcColIndex === destIndex) return;
-
-            const table = th.closest('table');
-            if (!table) return;
-
-            const rows = Array.from(table.rows);
-            rows.forEach(row => {
-                if (dragSrcColIndex < row.cells.length && destIndex < row.cells.length) {
-                    const srcCell = row.cells[dragSrcColIndex];
-                    const destCell = row.cells[destIndex];
-                    if (srcCell && destCell && srcCell !== destCell) {
-                        const refNode = dragSrcColIndex < destIndex ? destCell.nextSibling : destCell;
-                        row.insertBefore(srcCell, refNode);
-                    }
-                }
-            });
-
-            const headerRow = thead.querySelector('tr');
-            if (headerRow) {
-                const cols = Array.from(headerRow.querySelectorAll('th.turma-col'));
-                const novaOrdemIds = cols
-                    .map(c => c.dataset.turmaId)
-                    .filter(Boolean);
-                ORDEM_TURMAS_POR_TURNO[turno] = novaOrdemIds;
-                try {
-                    localStorage.setItem(`${APP_PREFIX}ordem_turmas_turno`, JSON.stringify(ORDEM_TURMAS_POR_TURNO));
-                } catch (e) {}
+            const srcTurmaId = dragSrcTurmaId;
+            const destTurmaId = th.dataset.turmaId || null;
+            const srcVisivelIndex = srcTurmaId ? idsVisiveis.indexOf(srcTurmaId) : -1;
+            const destVisivelIndex = destTurmaId ? idsVisiveis.indexOf(destTurmaId) : -1;
+            if (srcVisivelIndex >= 0 && destVisivelIndex >= 0) {
+                salvarOrdemTurmasDepoisArraste(srcVisivelIndex, destVisivelIndex);
+                montarGradeTurno(turnoAtualGrade);
             }
-
             dragSrcColIndex = null;
+            dragSrcTurmaId = null;
+        });
+        th.addEventListener('dragend', () => {
+            dragSrcColIndex = null;
+            dragSrcTurmaId = null;
         });
     });
 
@@ -4553,6 +4988,8 @@ function harmonizarFamiliasPortMatInsercaoRapida(turno, turmaId, professorId) {
     montarGradeTurno(turnoAtualGrade);
 }
 
+const NUM_TENTATIVAS_AJUSTE_INTELIGENTE = 5;
+
 function ajusteInteligente() {
     if (!confirm('O ajuste inteligente vai tentar compactar os horários (evitar buracos) neste turno. Continuar?')) {
         return;
@@ -4583,9 +5020,19 @@ function ajusteInteligente() {
 
     const temposValidos = getTempos(turnoAtualGrade).filter(t => !t.intervalo);
 
-    for (let tentativa = 0; tentativa < 10; tentativa++) {
+    const totalPassos = NUM_TENTATIVAS_AJUSTE_INTELIGENTE * turmasTurno.length * DIAS_SEMANA.length;
+    let passoAtual = 0;
+    function atualizarProgresso() {
+        if (!totalPassos) return;
+        passoAtual++;
+        const pct = Math.min(100, Math.round((passoAtual / totalPassos) * 100));
+        setProgressoAjusteInteligente(pct);
+    }
+
+    for (let tentativa = 0; tentativa < NUM_TENTATIVAS_AJUSTE_INTELIGENTE; tentativa++) {
         turmasTurno.forEach(turma => {
             DIAS_SEMANA.forEach(dia => {
+                atualizarProgresso();
                 const aulasDia = temposValidos.map(tempo =>
                     obterAula(turno, dia, turma.id, tempo.id) || null
                 );
@@ -4770,18 +5217,56 @@ function ajusteInteligente() {
     melhorPercentualAjustePorTurno[turno] = melhorQualidade;
     salvarLocal();
     montarGradeTurno(turnoAtualGrade);
-    mostrarToast(
+        mostrarToast(
         `Ajuste inteligente aplicado com sucesso: ${melhorQualidade}% dos grupos de aulas estão bem alocados (${melhorInfo.totalOk} de ${melhorInfo.totalAvaliado}). Use "Desfazer" se necessário.`
     );
 }
 
+function setProgressoAjusteInteligente(percentual) {
+    const btn = document.querySelector('.editor-actions .btn-primary');
+    const status = document.getElementById('ajusteInteligenteStatus');
+    if (percentual == null || percentual >= 100) {
+        if (btn) {
+            const original = btn.getAttribute('data-label-original');
+            if (original) {
+                btn.textContent = original;
+            }
+            btn.removeAttribute('data-label-original');
+        }
+        if (status) {
+            status.textContent = '';
+        }
+        return;
+    }
+    if (btn) {
+        if (!btn.getAttribute('data-label-original')) {
+            btn.setAttribute('data-label-original', btn.textContent);
+        }
+        const base = btn.getAttribute('data-label-original') || btn.textContent;
+        btn.textContent = `${base} (${percentual}%)`;
+    }
+    if (status) {
+        status.textContent = `Ajuste inteligente em andamento: analisando aproximadamente ${percentual}% da grade...`;
+    }
+}
+
 function executarAjusteInteligente() {
     const chk = document.getElementById('chkUsarIaNoAjuste');
-    const usarIa = !!(chk && chk.checked);
+    const usarIa = !!(chk && chk.checked && usuarioTemAcessoCompleto());
+    const btn = document.querySelector('.editor-actions .btn-primary');
+    if (btn) {
+        btn.disabled = true;
+    }
     if (usarIa) {
-        ajusteIA();
+        ajusteIA().finally(() => {
+            if (btn) btn.disabled = false;
+        });
     } else {
-        ajusteInteligente();
+        try {
+            ajusteInteligente();
+        } finally {
+            if (btn) btn.disabled = false;
+        }
     }
 }
 
@@ -4792,32 +5277,165 @@ async function ajusteIA() {
 
     const turno = turnoAtualGrade;
     const payload = montarPayloadAjusteIA(turno);
-    await solicitarAjusteIABackend(payload);
+    mostrarToast('Enviando grade para análise da IA...', 'info');
+    const resposta = await solicitarAjusteIABackend(payload);
+    if (!resposta) {
+        mostrarToast('Não foi possível aplicar o Ajuste IA. Verifique se o servidor IA está em execução.', 'error');
+        return;
+    }
 
-    ajusteInteligente();
-    verificarConflitosTurno();
-    mostrarToast('Ajuste IA aplicado. Revise a grade e use "Desfazer" se necessário.');
+    executarAjusteInteligenteCompletoInterno();
+    const totalAulas = Array.isArray(resposta.aulas) ? resposta.aulas.length : 0;
+    mostrarToast(`Ajuste IA aplicado para o turno ${turnoAtualGrade}. Aulas sugeridas: ${totalAulas}. Revise a grade e, se desejar, clique em "Verificar Conflitos" ou use "Desfazer".`);
 }
 
 function obterEscolaIdAtual() {
-    return 'EETEPA';
+    if (tenantAtual && tenantAtual.codigo) {
+        return tenantAtual.codigo;
+    }
+    return 'SEM_TENANT';
+}
+
+let persistenciaPgEmAndamento = false;
+let persistenciaPgPendente = false;
+let persistenciaPgTimer = null;
+
+function montarSnapshotPersistencia() {
+    return {
+        professores: Array.isArray(professores) ? professores : [],
+        turmas: Array.isArray(turmas) ? turmas : [],
+        aulas: Array.isArray(aulas) ? aulas : [],
+        cursos: Array.isArray(cursos) ? cursos : [],
+        temposPorTurno: TEMPOS_POR_TURNO || {},
+        apelidosDisciplinas: apelidosDisciplinas || {},
+        ordemTurmasPorTurno: ORDEM_TURMAS_POR_TURNO || {},
+        salvoEm: new Date().toISOString()
+    };
+}
+
+function aplicarSnapshotPersistencia(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return false;
+    professores = Array.isArray(snapshot.professores) ? snapshot.professores : [];
+    turmas = Array.isArray(snapshot.turmas) ? snapshot.turmas : [];
+    aulas = Array.isArray(snapshot.aulas) ? snapshot.aulas : [];
+    cursos = Array.isArray(snapshot.cursos) ? snapshot.cursos : [];
+    if (!cursos.includes(CURSO_TEMPO_INTEGRAL)) {
+        cursos.push(CURSO_TEMPO_INTEGRAL);
+    }
+    if (snapshot.temposPorTurno && typeof snapshot.temposPorTurno === 'object') {
+        TEMPOS_POR_TURNO = snapshot.temposPorTurno;
+    }
+    apelidosDisciplinas = (snapshot.apelidosDisciplinas && typeof snapshot.apelidosDisciplinas === 'object')
+        ? snapshot.apelidosDisciplinas
+        : {};
+    ORDEM_TURMAS_POR_TURNO = (snapshot.ordemTurmasPorTurno && typeof snapshot.ordemTurmasPorTurno === 'object')
+        ? snapshot.ordemTurmasPorTurno
+        : {};
+    return true;
+}
+
+function possuiDadosLocais() {
+    return professores.length > 0 || turmas.length > 0 || aulas.length > 0;
+}
+
+async function postJsonComTimeout(url, payload, timeoutMs) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+        const resposta = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload || {}),
+            signal: controller.signal
+        });
+        if (!resposta.ok) {
+            throw new Error(`HTTP ${resposta.status}`);
+        }
+        return await resposta.json();
+    } finally {
+        clearTimeout(timeout);
+    }
+}
+
+async function salvarPersistenciaPostgresAgora() {
+    if (!PERSISTENCIA_PG_ATIVA) return false;
+    const escolaId = obterEscolaIdAtual();
+    const dados = montarSnapshotPersistencia();
+    try {
+        const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/salvar`, { escolaId, dados }, 4000);
+        return Boolean(resposta && resposta.status === 'ok');
+    } catch (e) {
+        return false;
+    }
+}
+
+async function executarPersistenciaPostgresFila() {
+    if (persistenciaPgEmAndamento) {
+        persistenciaPgPendente = true;
+        return;
+    }
+    persistenciaPgEmAndamento = true;
+    try {
+        await salvarPersistenciaPostgresAgora();
+    } finally {
+        persistenciaPgEmAndamento = false;
+        if (persistenciaPgPendente) {
+            persistenciaPgPendente = false;
+            agendarPersistenciaPostgres();
+        }
+    }
+}
+
+function agendarPersistenciaPostgres() {
+    if (!PERSISTENCIA_PG_ATIVA) return;
+    if (persistenciaPgTimer) {
+        clearTimeout(persistenciaPgTimer);
+    }
+    persistenciaPgTimer = setTimeout(() => {
+        persistenciaPgTimer = null;
+        executarPersistenciaPostgresFila();
+    }, 1200);
+}
+
+async function sincronizarInicialComPersistenciaPostgres() {
+    if (!PERSISTENCIA_PG_ATIVA) return;
+    if (possuiDadosLocais()) {
+        agendarPersistenciaPostgres();
+        return;
+    }
+    try {
+        const escolaId = obterEscolaIdAtual();
+        const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/carregar`, { escolaId }, 4000);
+        if (!resposta || resposta.status !== 'ok' || !resposta.encontrou || !resposta.dados) {
+            return;
+        }
+        const aplicou = aplicarSnapshotPersistencia(resposta.dados);
+        if (!aplicou) return;
+        migrarEstruturaLocal();
+        salvarLocal();
+        mostrarToast('Dados restaurados do PostgreSQL.');
+        setTimeout(() => location.reload(), 100);
+    } catch (e) {
+    }
 }
 
 function montarPayloadAjusteIA(turno) {
     const turmasTurno = turmas.filter(t => t.turno === turno);
     const aulasTurno = aulas.filter(a => a.turno === turno);
     const escolaId = obterEscolaIdAtual();
+    const temposTurno = getTempos(turno);
     return {
         escolaId,
         turno,
         turmas: turmasTurno,
         aulas: aulasTurno,
-        professores
+        professores,
+        tempos: temposTurno
     };
 }
 
 function solicitarAjusteIABackend(payload) {
-    return fetch('http://localhost:3001/ajuste-ia', {
+    return fetch(`${BACKEND_IA_URL}/ajuste-ia`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -5217,44 +5835,34 @@ function gerarRelatorioRapidoProfessorPDF() {
 
     const corProf = prof.cor || '#3498db';
 
-    TURNOS.forEach((turno, idxTurno) => {
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(tituloBase, doc.internal.pageSize.getWidth() / 2, 10, { align: 'center' });
+
+    doc.setFontSize(8);
+    doc.setFont(undefined, 'normal');
+    doc.text(`Gerado em: ${dataStr} às ${horaStr}`, doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
+
+    const turmasLabel = turmasProf.length ? `Turmas: ${turmasProf.join(', ')}` : 'Turmas: (nenhuma turma encontrada)';
+    doc.text(turmasLabel, doc.internal.pageSize.getWidth() / 2, 19, { align: 'center' });
+
+    let yAtual = 24;
+    TURNOS.forEach(turno => {
         const aulasTurno = aulasProf.filter(a => a.turno === turno);
         if (!aulasTurno.length) return;
 
-        if (idxTurno > 0) {
-            doc.addPage();
-        }
-
-        const titulo = `${tituloBase} - TURNO DA ${textoTurno(turno).toUpperCase()}`;
-        doc.setFontSize(10);
-        doc.setFont(undefined, 'bold');
-        doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 10, { align: 'center' });
-
-        doc.setFontSize(8);
-        doc.setFont(undefined, 'normal');
-        doc.text(`Gerado em: ${dataStr} às ${horaStr}`, doc.internal.pageSize.getWidth() / 2, 15, { align: 'center' });
-
-        const turmasLabel = turmasProf.length ? `Turmas: ${turmasProf.join(', ')}` : 'Turmas: (nenhuma turma encontrada)';
-        doc.text(turmasLabel, doc.internal.pageSize.getWidth() / 2, 19, { align: 'center' });
-
-        const temposTurno = getTempos(turno).filter(t => !t.intervalo);
-
-        const diasUsados = DIAS_SEMANA.filter(dia =>
+        const diasUsadosTurno = DIAS_SEMANA.filter(dia =>
             aulasTurno.some(a => a.dia === dia)
         );
-
-        const cabecalhoDias = diasUsados.map(dia => {
-            return textoDia(dia).substring(0, 3).toUpperCase();
-        });
-
+        const cabecalhoDias = diasUsadosTurno.map(dia => textoDia(dia).substring(0, 3).toUpperCase());
         const head = [['HORÁRIO', ...cabecalhoDias]];
         const body = [];
 
+        const temposTurno = getTempos(turno).filter(t => !t.intervalo);
         temposTurno.forEach(tempo => {
             const row = [];
             row.push(`${tempo.inicio}\n${tempo.fim}`);
-
-            diasUsados.forEach(dia => {
+            diasUsadosTurno.forEach(dia => {
                 const aula = aulasTurno.find(a => a.dia === dia && a.tempoId === tempo.id);
                 if (!aula) {
                     row.push('');
@@ -5265,47 +5873,57 @@ function gerarRelatorioRapidoProfessorPDF() {
                     row.push(nomeTurma ? `${nomeDisc}\n${nomeTurma}` : nomeDisc);
                 }
             });
-
             body.push(row);
+        });
+
+        doc.setFontSize(8);
+        doc.setFont(undefined, 'bold');
+        doc.text(`TURNO DA ${textoTurno(turno).toUpperCase()}`, 14, yAtual + 2);
+
+        const columnStylesRapidoProfessor = construirColumnStylesComLarguraPadrao(doc, {
+            inicioFlex: 1,
+            quantidadeFlex: diasUsadosTurno.length,
+            larguraPadrao: 45,
+            larguraMinima: 20,
+            fixas: {
+                0: { cellWidth: 18 }
+            }
         });
 
         doc.autoTable({
             head,
             body,
-            startY: 24,
+            startY: yAtual + 4,
             theme: 'grid',
+            pageBreak: 'avoid',
+            tableWidth: 'wrap',
             styles: {
-                fontSize: 7,
-                cellPadding: 1.2,
+                fontSize: 6.2,
+                cellPadding: 0.8,
                 valign: 'middle',
                 halign: 'center',
-                minCellHeight: 8
+                minCellHeight: 6
             },
             headStyles: usarColorido ? {
                 fillColor: [52, 152, 219],
                 textColor: 255,
                 fontStyle: 'bold',
-                fontSize: 7,
-                cellPadding: 1.2,
-                minCellHeight: 10,
+                fontSize: 6.4,
+                cellPadding: 1,
+                minCellHeight: 8,
                 halign: 'center',
                 valign: 'middle'
             } : {
                 fillColor: [240, 240, 240],
                 textColor: 0,
                 fontStyle: 'bold',
-                fontSize: 7,
-                cellPadding: 1.2,
-                minCellHeight: 10,
+                fontSize: 6.4,
+                cellPadding: 1,
+                minCellHeight: 8,
                 halign: 'center',
                 valign: 'middle'
             },
-            columnStyles: {
-                0: { cellWidth: 14 }
-            },
-            columnStyles: {
-                0: { cellWidth: 18 }
-            },
+            columnStyles: columnStylesRapidoProfessor,
             didParseCell: function(data) {
                 if (!usarColorido) return;
                 if (data.section !== 'body') return;
@@ -5318,6 +5936,8 @@ function gerarRelatorioRapidoProfessorPDF() {
                 data.cell.styles.textColor = getPdfTextColor(corProf);
             }
         });
+
+        yAtual = (doc.lastAutoTable && doc.lastAutoTable.finalY ? doc.lastAutoTable.finalY : yAtual + 20) + 5;
     });
 
     doc.save(`horario_prof_qr_${prof.nome.replace(/\s+/g, '_').toLowerCase()}_${new Date().toISOString().slice(0,10)}.pdf`);
@@ -5401,11 +6021,22 @@ function gerarRelatorioRapidoTurmaPDF() {
         body.push(row);
     });
 
+    const columnStylesRapidoTurma = construirColumnStylesComLarguraPadrao(doc, {
+        inicioFlex: 1,
+        quantidadeFlex: diasUsados.length,
+        larguraPadrao: 45,
+        larguraMinima: 20,
+        fixas: {
+            0: { cellWidth: 18 }
+        }
+    });
+
     doc.autoTable({
         head,
         body,
         startY: 22,
         theme: 'grid',
+        tableWidth: 'wrap',
         styles: {
             fontSize: 7,
             cellPadding: 1.2,
@@ -5432,9 +6063,7 @@ function gerarRelatorioRapidoTurmaPDF() {
             halign: 'center',
             valign: 'middle'
         },
-        columnStyles: {
-            0: { cellWidth: 18 }
-        },
+        columnStyles: columnStylesRapidoTurma,
         didParseCell: function(data) {
             if (!usarColorido) return;
             if (data.section !== 'body') return;
@@ -5457,55 +6086,69 @@ function gerarRelatorioRapidoTurmaPDF() {
     mostrarToast('PDF rápido da turma gerado com sucesso!');
 }
 
+function aplicarModoQrRestrito() {
+    if (!QRCODE_MODO_RESTRITO.ativo) return;
+
+    const loginCard = document.getElementById('loginCard');
+    if (loginCard) {
+        loginCard.style.display = 'none';
+    }
+
+    const mainContent = document.querySelector('.main-content');
+    if (mainContent) {
+        mainContent.style.display = 'flex';
+    }
+
+    const sidebar = document.querySelector('.sidebar');
+    if (sidebar) {
+        sidebar.style.display = 'none';
+    }
+
+    document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
+    const secRel = document.getElementById('relatorios');
+    if (secRel) {
+        secRel.classList.add('active');
+    }
+
+    const qrCard = document.getElementById('cardRelatorioQr');
+    const outrosCards = document.querySelectorAll('#relatorios .card');
+    outrosCards.forEach(card => {
+        if (card !== qrCard) {
+            card.style.display = 'none';
+        }
+    });
+
+    const qrBody = document.getElementById('relatorioQrBody');
+    const btnToggleQr = document.getElementById('btnToggleRelatorioQr');
+    if (qrBody) {
+        qrBody.classList.remove('hidden');
+    }
+    if (btnToggleQr) {
+        btnToggleQr.classList.remove('collapsed');
+    }
+
+    const grupoProf = document.getElementById('qrProfGroup');
+    const grupoTurma = document.getElementById('qrTurmaGroup');
+    const grupoOpcoes = document.getElementById('qrOpcoesGroup');
+    if (QRCODE_MODO_RESTRITO.alvo === 'prof') {
+        if (grupoTurma) grupoTurma.style.display = 'none';
+        if (grupoProf) grupoProf.style.display = '';
+    } else if (QRCODE_MODO_RESTRITO.alvo === 'turma') {
+        if (grupoProf) grupoProf.style.display = 'none';
+        if (grupoTurma) grupoTurma.style.display = '';
+    }
+    if (grupoOpcoes) {
+        grupoOpcoes.style.display = 'none';
+    }
+
+    document.querySelectorAll('#cardRelatorioQr .btn-secondary').forEach(btn => {
+        btn.style.display = 'none';
+    });
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     renderDisponibilidade('dispProfessor', null);
-
-    const params = new URLSearchParams(window.location.search || '');
-    const hasProfShort = params.has('p');
-    const hasTurmaShort = params.has('t');
-    const modoQr = params.get('qr') === '1' || params.get('modo') === 'qr' || hasProfShort || hasTurmaShort;
-    const alvoQr = params.get('alvo') || (hasProfShort ? 'prof' : hasTurmaShort ? 'turma' : '');
-
-    if (modoQr) {
-        const navButtons = document.querySelectorAll('.menu-btn');
-        navButtons.forEach(btn => {
-            const onclick = btn.getAttribute('onclick') || '';
-            if (!onclick.includes("showSection('relatorios'")) {
-                btn.style.display = 'none';
-            }
-        });
-
-        showSection('relatorios');
-        const secRel = document.getElementById('relatorios');
-        if (secRel && typeof secRel.scrollIntoView === 'function') {
-            secRel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
-
-        const qrCard = document.getElementById('cardRelatorioQr');
-        const outrosCards = document.querySelectorAll('#relatorios .card');
-        outrosCards.forEach(card => {
-            if (card !== qrCard) {
-                card.style.display = 'none';
-            }
-        });
-
-        const qrBody = document.getElementById('relatorioQrBody');
-        const btnToggleQr = document.getElementById('btnToggleRelatorioQr');
-        if (qrBody) {
-            qrBody.classList.remove('hidden');
-        }
-        if (btnToggleQr) {
-            btnToggleQr.classList.remove('collapsed');
-        }
-
-        const grupoProf = document.getElementById('qrProfGroup');
-        const grupoTurma = document.getElementById('qrTurmaGroup');
-        if (alvoQr === 'prof' && grupoTurma) {
-            grupoTurma.style.display = 'none';
-        } else if (alvoQr === 'turma' && grupoProf) {
-            grupoProf.style.display = 'none';
-        }
-    }
+    aplicarModoQrRestrito();
 });
 
 function copiarLinkQrProfessor() {
@@ -5856,6 +6499,156 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
+
+function ajustarFonteCabecalhoTurmasPDF(data, doc, opcoes = {}) {
+    if (data.section !== 'head' || data.column.index < 2) return;
+    const texto = Array.isArray(data.cell.raw)
+        ? data.cell.raw.join(' ')
+        : String(data.cell.raw || '').trim();
+    if (!texto) return;
+    const padding = typeof data.cell.styles.cellPadding === 'number' ? data.cell.styles.cellPadding : 2;
+    const larguraUtil = Math.max(1, data.cell.width - (padding * 2));
+    const alturaBase = typeof data.cell.styles.minCellHeight === 'number' ? data.cell.styles.minCellHeight : (opcoes.alturaMinima || 12);
+    const fonteMaxima = typeof opcoes.fonteMaxima === 'number' ? opcoes.fonteMaxima : 12;
+    const fonteMinima = typeof opcoes.fonteMinima === 'number' ? opcoes.fonteMinima : 8;
+    const maxLinhas = typeof opcoes.maxLinhas === 'number' ? opcoes.maxLinhas : 2;
+    const alturaMaxima = typeof opcoes.alturaMaxima === 'number' ? opcoes.alturaMaxima : 20;
+    let fonteEscolhida = fonteMinima;
+    let linhasEscolhidas = 1;
+    for (let fonte = fonteMaxima; fonte >= fonteMinima; fonte -= 0.5) {
+        doc.setFontSize(fonte);
+        const linhas = doc.splitTextToSize(texto, larguraUtil);
+        if (linhas.length <= maxLinhas) {
+            fonteEscolhida = fonte;
+            linhasEscolhidas = linhas.length;
+            break;
+        }
+    }
+    const alturaLinhaFinal = fonteEscolhida * 0.3528 * 1.15;
+    const alturaFinal = (linhasEscolhidas * alturaLinhaFinal) + (padding * 2);
+    data.cell.styles.fontSize = fonteEscolhida;
+    data.cell.styles.overflow = 'linebreak';
+    data.cell.styles.minCellHeight = Math.max(alturaBase, Math.min(alturaFinal, alturaMaxima), 12);
+}
+
+function desenharCabecalhoSemQuebraExpandidoPDF(data, doc, opcoes = {}) {
+    if (data.section !== 'head' || data.column.index < 2) return;
+    const textoBruto = Array.isArray(data.cell.raw)
+        ? data.cell.raw.join(' ')
+        : String(data.cell.raw || '');
+    const texto = textoBruto.replace(/\s+/g, ' ').trim();
+    if (!texto) return;
+
+    const padding = typeof data.cell.styles.cellPadding === 'number' ? data.cell.styles.cellPadding : 1;
+    const larguraUtil = Math.max(1, data.cell.width - (padding * 2));
+    const fonteMaxima = typeof opcoes.fonteMaxima === 'number' ? opcoes.fonteMaxima : 13;
+    const fonteMinima = typeof opcoes.fonteMinima === 'number' ? opcoes.fonteMinima : 6.5;
+
+    let fonteEscolhida = fonteMinima;
+    for (let fonte = fonteMaxima; fonte >= fonteMinima; fonte -= 0.2) {
+        doc.setFontSize(fonte);
+        const larguraTexto = doc.getTextWidth(texto);
+        if (larguraTexto <= larguraUtil) {
+            fonteEscolhida = fonte;
+            break;
+        }
+    }
+
+    const prevFontSize = doc.getFontSize();
+    doc.setFont(undefined, 'bold');
+    doc.setFontSize(fonteEscolhida);
+
+    const larguraBase = doc.getTextWidth(texto);
+    let espacoEntreLetras = 0;
+    if (texto.length > 1 && larguraBase > 0) {
+        espacoEntreLetras = (larguraUtil - larguraBase) / (texto.length - 1);
+        if (!Number.isFinite(espacoEntreLetras)) espacoEntreLetras = 0;
+        espacoEntreLetras = Math.max(0, Math.min(espacoEntreLetras, 2.2));
+    }
+
+    let charSpaceAnterior = 0;
+    if (typeof doc.getCharSpace === 'function') {
+        charSpaceAnterior = doc.getCharSpace();
+    }
+    if (typeof doc.setCharSpace === 'function') {
+        doc.setCharSpace(espacoEntreLetras);
+    }
+
+    const x = data.cell.x + padding;
+    const yCentro = data.cell.y + (data.cell.height / 2);
+    const y = yCentro + ((fonteEscolhida * 0.3528) * 0.33);
+    doc.setTextColor(255);
+    doc.text(texto, x, y, { align: 'left' });
+
+    if (typeof doc.setCharSpace === 'function') {
+        doc.setCharSpace(charSpaceAnterior || 0);
+    }
+    doc.setFontSize(prevFontSize);
+}
+
+function ajustarCabecalhoFixoDiaHorarioPDF(data) {
+    if (data.section !== 'head' || data.column.index > 1) return;
+    const textoOriginal = Array.isArray(data.cell.text) ? data.cell.text.join(' ') : String(data.cell.text || '');
+    const textoLimpo = textoOriginal.replace(/\s+/g, ' ').trim();
+    if (textoLimpo) {
+        data.cell.text = [textoLimpo];
+    }
+    data.cell.styles.fontSize = 9;
+    data.cell.styles.cellPadding = 1;
+    data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight || 0, 12);
+    data.cell.styles.overflow = 'hidden';
+    data.cell.styles.halign = 'center';
+    data.cell.styles.valign = 'middle';
+}
+
+function construirColumnStylesComLarguraPadrao(doc, config = {}) {
+    const inicioFlex = typeof config.inicioFlex === 'number' ? config.inicioFlex : 2;
+    const quantidadeFlex = Math.max(0, parseInt(config.quantidadeFlex, 10) || 0);
+    const larguraPadrao = typeof config.larguraPadrao === 'number' ? config.larguraPadrao : 18;
+    const larguraMinima = typeof config.larguraMinima === 'number' ? config.larguraMinima : 10;
+    const margemLateral = typeof config.margemLateral === 'number' ? config.margemLateral : 2;
+    const fixas = config.fixas || {};
+    const larguraPagina = doc.internal.pageSize.getWidth();
+    const larguraFixaTotal = Object.values(fixas).reduce((acc, col) => {
+        const largura = col && typeof col.cellWidth === 'number' ? col.cellWidth : 0;
+        return acc + largura;
+    }, 0);
+    const larguraDisponivel = Math.max(20, larguraPagina - (margemLateral * 2) - larguraFixaTotal);
+    const larguraFlex = quantidadeFlex > 0
+        ? Math.max(larguraMinima, Math.min(larguraPadrao, larguraDisponivel / quantidadeFlex))
+        : larguraPadrao;
+
+    const estilos = { ...fixas };
+    for (let i = 0; i < quantidadeFlex; i++) {
+        estilos[inicioFlex + i] = { cellWidth: larguraFlex };
+    }
+    return estilos;
+}
+
+function aplicarTema(tema) {
+    const temaFinal = tema === 'escuro' ? 'escuro' : 'claro';
+    document.body.classList.toggle('theme-dark', temaFinal === 'escuro');
+    const toggleTema = document.getElementById('toggleTemaEscuro');
+    if (toggleTema) {
+        toggleTema.checked = temaFinal === 'escuro';
+    }
+    const toggleTemaLabel = document.getElementById('toggleTemaLabel');
+    if (toggleTemaLabel) {
+        toggleTemaLabel.textContent = temaFinal === 'escuro' ? 'Tema escuro' : 'Tema claro';
+    }
+    try {
+        localStorage.setItem(CHAVE_TEMA, temaFinal);
+    } catch (e) {}
+}
+
+function inicializarTema() {
+    let temaSalvo = 'claro';
+    try {
+        temaSalvo = localStorage.getItem(CHAVE_TEMA) || 'claro';
+    } catch (e) {}
+    aplicarTema(temaSalvo);
+}
+
 function gerarRelatorioTurnoPDF() {
     const { jsPDF } = window.jspdf;
     const turno = document.getElementById('turnoRelatorio').value;
@@ -5887,9 +6680,20 @@ function gerarRelatorioTurnoPDF() {
     const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format });
 
     const titulo = `HORÁRIO - TURNO DA ${textoTurno(turno).toUpperCase()} — Gerado em: ${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`;
-    doc.setFont(undefined, 'bold');
+    const formatoVisualizacao = `(Papel ${String(format).toUpperCase()})`;
+    const yTitulo = 6;
+    const gapTituloFormato = 2;
     doc.setFontSize(8);
-    doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 6, { align: 'center' });
+    doc.setFont(undefined, 'bold');
+    const larguraTitulo = doc.getTextWidth(titulo);
+    doc.setFont(undefined, 'italic');
+    const larguraFormato = doc.getTextWidth(formatoVisualizacao);
+    const larguraTotal = larguraTitulo + gapTituloFormato + larguraFormato;
+    const xInicial = (doc.internal.pageSize.getWidth() - larguraTotal) / 2;
+    doc.setFont(undefined, 'bold');
+    doc.text(titulo, xInicial, yTitulo);
+    doc.setFont(undefined, 'italic');
+    doc.text(formatoVisualizacao, xInicial + larguraTitulo + gapTituloFormato, yTitulo);
 
     const head = [['DIA', 'HORÁRIO', ...turmasTurno.map(t => t.nome)]];
     const body = [];
@@ -5967,11 +6771,23 @@ function gerarRelatorioTurnoPDF() {
     } else if (colCount > 12) {
         bodyFont = 9;
     }
+    const columnStylesTurno = construirColumnStylesComLarguraPadrao(doc, {
+        inicioFlex: 2,
+        quantidadeFlex: turmasTurno.length,
+        larguraPadrao: 45,
+        larguraMinima: 14,
+        fixas: {
+            0: { cellWidth: 10, cellPadding: 0 },
+            1: { cellWidth: 24, fontStyle: 'bold' }
+        }
+    });
+
     doc.autoTable({
         head,
         body,
         startY: 8,
         theme: 'grid',
+        tableWidth: 'wrap',
         styles: {
             fontSize: bodyFont,
             cellPadding: 1,
@@ -5986,16 +6802,32 @@ function gerarRelatorioTurnoPDF() {
             fillColor: [52, 152, 219],
             textColor: 255,
             fontStyle: 'bold',
-            fontSize: 8,
-            cellPadding: 1,
+            fontSize: 11,
+            cellPadding: 2,
+            minCellHeight: 12,
             halign: 'center',
-            valign: 'middle'
+            valign: 'middle',
+            overflow: 'linebreak'
         },
-        columnStyles: {
-            0: { cellWidth: 10, cellPadding: 0 },
-            1: { cellWidth: 20, fontStyle: 'bold' }
-        },
+        columnStyles: columnStylesTurno,
         didParseCell: function(data) {
+            ajustarCabecalhoFixoDiaHorarioPDF(data);
+            if (data.section === 'head' && data.column.index >= 2) {
+                data.cell.styles.fontSize = 10;
+                data.cell.styles.overflow = 'linebreak';
+                data.cell.styles.cellPadding = 1;
+                data.cell.styles.minCellHeight = Math.max(data.cell.styles.minCellHeight || 0, 14);
+                data.cell.styles.halign = 'center';
+                data.cell.styles.valign = 'middle';
+            } else {
+                ajustarFonteCabecalhoTurmasPDF(data, doc);
+            }
+            if (data.section === 'body' && data.column.index === 1) {
+                data.cell.styles.fontSize = 9;
+                data.cell.styles.overflow = 'hidden';
+                const bruto = Array.isArray(data.cell.raw) ? data.cell.raw.join(' ') : String(data.cell.raw || '');
+                data.cell.text = [bruto.replace(/\s*-\s*/g, ' - ').replace(/\s+/g, ' ').trim()];
+            }
             if (data.section === 'body' && data.column.index === 0) {
                 data.cell.text = [];
             }
@@ -6121,7 +6953,7 @@ function gerarRelatorioTurnoNumeroTurmasPDF() {
         } else if (colCount > 12) {
             bodyFont = 9;
         }
-        let minCellHeight = 4;
+        let minCellHeight = 6;
 
         diasUsados.forEach((dia, idxDia) => {
             const temposTurno = temposTurnoBase;
@@ -6188,11 +7020,23 @@ function gerarRelatorioTurnoNumeroTurmasPDF() {
             }
         });
 
+        const columnStylesGrupo = construirColumnStylesComLarguraPadrao(doc, {
+            inicioFlex: 2,
+            quantidadeFlex: grupo.length,
+            larguraPadrao: 45,
+            larguraMinima: 14,
+            fixas: {
+                0: { cellWidth: 10, cellPadding: 0 },
+                1: { cellWidth: 24, fontStyle: 'bold' }
+            }
+        });
+
         doc.autoTable({
             head,
             body,
             startY: 8,
             theme: 'grid',
+            tableWidth: 'wrap',
             styles: {
                 fontSize: bodyFont,
                 cellPadding: 1,
@@ -6207,18 +7051,29 @@ function gerarRelatorioTurnoNumeroTurmasPDF() {
                 fillColor: [52, 152, 219],
                 textColor: 255,
                 fontStyle: 'bold',
-                fontSize: 8,
-                cellPadding: 1,
+                fontSize: 11,
+                cellPadding: 2,
+                minCellHeight: 12,
                 halign: 'center',
-                valign: 'middle'
+                valign: 'middle',
+                overflow: 'linebreak'
             },
-            columnStyles: {
-                0: { cellWidth: 10, cellPadding: 0 },
-                1: { cellWidth: 20, fontStyle: 'bold' }
-            },
+            columnStyles: columnStylesGrupo,
             didParseCell: function(data) {
+                ajustarCabecalhoFixoDiaHorarioPDF(data);
+                ajustarFonteCabecalhoTurmasPDF(data, doc, {
+                    fonteMaxima: 15,
+                    fonteMinima: 9,
+                    maxLinhas: 1,
+                    alturaMaxima: 22
+                });
                 if (data.section === 'body') {
-                    if (data.column.index === 0) {
+                    if (data.column.index === 1) {
+                        data.cell.styles.fontSize = 9;
+                        data.cell.styles.overflow = 'hidden';
+                        const bruto = Array.isArray(data.cell.raw) ? data.cell.raw.join(' ') : String(data.cell.raw || '');
+                        data.cell.text = [bruto.replace(/\s*-\s*/g, ' - ').replace(/\s+/g, ' ').trim()];
+                    } else if (data.column.index === 0) {
                         data.cell.text = [];
                     } else if (data.column.index >= 2) {
                         const raw = data.row.raw[data.column.index];
@@ -6547,32 +7402,48 @@ function gerarRelatorioCursoPDF() {
     } else if (colCount > 12) {
         bodyFont = 9;
     }
+    const columnStylesCurso = construirColumnStylesComLarguraPadrao(doc, {
+        inicioFlex: 2,
+        quantidadeFlex: turmasSelecionadas.length,
+        larguraPadrao: 45,
+        larguraMinima: 14,
+        fixas: {
+            0: { cellWidth: 10, cellPadding: 0 },
+            1: { cellWidth: 20, fontStyle: 'bold' }
+        }
+    });
+
     doc.autoTable({
         head,
         body,
         startY: 8,
         theme: 'grid',
+        tableWidth: 'wrap',
         styles: {
             fontSize: bodyFont,
             cellPadding: 1,
             valign: 'middle',
-            halign: 'center'
+            halign: 'center',
+            overflow: 'linebreak',
+            cellWidth: 'wrap',
+            minCellHeight: 6
         },
         margin: { top: 0, right: 0, bottom: 0, left: 0 },
         headStyles: {
             fillColor: [231, 76, 60],
             textColor: 255,
             fontStyle: 'bold',
-            fontSize: 8,
-            cellPadding: 1,
+            fontSize: 11,
+            cellPadding: 2,
+            minCellHeight: 12,
             halign: 'center',
-            valign: 'middle'
+            valign: 'middle',
+            overflow: 'linebreak'
         },
-        columnStyles: {
-            0: { cellWidth: 10, cellPadding: 0 },
-            1: { cellWidth: 20, fontStyle: 'bold' }
-        },
+        columnStyles: columnStylesCurso,
         didParseCell: function(data) {
+            ajustarCabecalhoFixoDiaHorarioPDF(data);
+            ajustarFonteCabecalhoTurmasPDF(data, doc);
             if (data.section === 'body' && data.column.index === 0) {
                 data.cell.text = [];
             }
@@ -7198,6 +8069,162 @@ function preverImpressaoConsulta() {
     }
 }
 
+function gerarConsultaPDF() {
+    const tabela = document.getElementById('tabelaConsulta');
+    if (!tabela) return;
+    const temConteudo = tabela.querySelector('tbody tr');
+    if (!temConteudo) {
+        mostrarToast('Gere a consulta antes de exportar o PDF.', 'warning');
+        return;
+    }
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+        mostrarToast('Biblioteca jsPDF não carregada.', 'error');
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const tipo = document.getElementById('tipoConsulta')?.value || 'consulta';
+    const titulo = (document.getElementById('tituloResultadoConsulta')?.textContent || 'Resultado').trim();
+    const contarColunasTabela = (tbl) => {
+        const trs = Array.from(tbl.querySelectorAll('thead tr'));
+        if (!trs.length) return 1;
+        let maxCols = 1;
+        trs.forEach(tr => {
+            const ths = Array.from(tr.querySelectorAll('th'));
+            const soma = ths.reduce((acc, th) => {
+                const c = parseInt(th.getAttribute('colspan') || '1', 10);
+                return acc + (Number.isFinite(c) && c > 0 ? c : 1);
+            }, 0);
+            if (soma > maxCols) maxCols = soma;
+        });
+        return maxCols;
+    };
+
+    const totalCols = contarColunasTabela(tabela);
+    let formato = totalCols > 12 ? 'a3' : 'a4';
+    let orientacao = totalCols > 8 ? 'landscape' : 'portrait';
+
+    // Para os relatórios “grade” (muitas colunas pequenas), manter A4 paisagem e aumentar escala do conteúdo.
+    if (tipo === 'disponibilidadeProfessoresInformada' || tipo === 'tempoProfessoresSala' || tipo === 'disponibilidadeProfessores') {
+        formato = 'a4';
+        orientacao = 'landscape';
+    }
+
+    const doc = new jsPDF({ orientation: orientacao, unit: 'mm', format: formato });
+
+    const dataHora = `${new Date().toLocaleDateString('pt-BR')} ${new Date().toLocaleTimeString('pt-BR')}`;
+    doc.setFontSize(10);
+    doc.setFont(undefined, 'bold');
+    doc.text(`${titulo} — Gerado em: ${dataHora}`, doc.internal.pageSize.getWidth() / 2, 8, { align: 'center' });
+
+    // Padrões por tipo para melhorar legibilidade e quebra de linhas em listas longas.
+    const configPorTipo = (() => {
+        if (tipo === 'professores') {
+            return {
+                tableWidth: 'auto',
+                styles: { fontSize: 9, cellPadding: 1.2, halign: 'left' },
+                headStyles: { fontSize: 9.5, cellPadding: 1.4, halign: 'center' },
+                columnStyles: { 0: { cellWidth: 30 } }
+            };
+        }
+        if (tipo === 'turnos') {
+            return {
+                tableWidth: 'auto',
+                styles: { fontSize: 9, cellPadding: 1.1, halign: 'center' },
+                headStyles: { fontSize: 9.5, cellPadding: 1.3, halign: 'center' }
+            };
+        }
+        if (tipo === 'disponibilidadeProfessoresInformada' || tipo === 'tempoProfessoresSala' || tipo === 'disponibilidadeProfessores') {
+            return {
+                tableWidth: 'auto',
+                styles: { fontSize: 8.6, cellPadding: 0.8, halign: 'center' },
+                headStyles: { fontSize: 9, cellPadding: 0.9, halign: 'center' }
+            };
+        }
+        return {
+            tableWidth: 'wrap',
+            styles: { fontSize: 7, cellPadding: 0.5, halign: 'center' },
+            headStyles: { fontSize: 7.2, cellPadding: 0.6, halign: 'center' }
+        };
+    })();
+
+    doc.autoTable({
+        html: '#tabelaConsulta',
+        startY: 12,
+        theme: 'grid',
+        tableWidth: configPorTipo.tableWidth,
+        styles: {
+            fontSize: configPorTipo.styles.fontSize,
+            cellPadding: configPorTipo.styles.cellPadding,
+            valign: 'middle',
+            halign: configPorTipo.styles.halign,
+            overflow: 'linebreak',
+            cellWidth: 'wrap'
+        },
+        headStyles: {
+            fillColor: [52, 152, 219],
+            textColor: 255,
+            fontStyle: 'bold',
+            fontSize: configPorTipo.headStyles.fontSize,
+            cellPadding: configPorTipo.headStyles.cellPadding,
+            halign: configPorTipo.headStyles.halign,
+            valign: 'middle'
+        },
+        columnStyles: configPorTipo.columnStyles || {},
+        didParseCell: function(data) {
+            if (data.section !== 'body') return;
+            const extrairTextoCelula = (valor) => {
+                if (valor === null || valor === undefined) return '';
+                if (Array.isArray(valor)) {
+                    return valor.map(extrairTextoCelula).join(' ');
+                }
+                if (typeof valor === 'string' || typeof valor === 'number' || typeof valor === 'boolean') {
+                    return String(valor);
+                }
+                if (valor && typeof valor === 'object') {
+                    // jsPDF/autoTable pode entregar o elemento HTML da célula em data.cell.raw.
+                    if (typeof valor.textContent === 'string') {
+                        return valor.textContent;
+                    }
+                    if (typeof valor.innerText === 'string') {
+                        return valor.innerText;
+                    }
+                }
+                return String(valor);
+            };
+            const raw = extrairTextoCelula(data.cell.raw);
+            const texto = raw.replace(/\s+/g, ' ').trim();
+            if (!texto) return;
+
+            // 1) Professores: disciplinas / detalhes longos em múltiplas linhas (melhora leitura no A4).
+            if (tipo === 'professores' && data.column.index >= 1) {
+                const quebra = texto
+                    .replace(/\s*\|\s*/g, '\n')
+                    .replace(/\s*,\s*/g, '\n');
+                data.cell.text = quebra.split('\n').map(s => s.trim()).filter(Boolean);
+                data.cell.styles.halign = 'left';
+                return;
+            }
+
+            // 2) Turnos: "Cursos Presentes" (última coluna) com quebra por vírgula.
+            if (tipo === 'turnos' && data.column.index === (totalCols - 1)) {
+                const quebra = texto.replace(/\s*,\s*/g, '\n');
+                data.cell.text = quebra.split('\n').map(s => s.trim()).filter(Boolean);
+                data.cell.styles.halign = 'left';
+                return;
+            }
+
+            // Mantém o texto limpo (sem duplicação de espaços) para todos os tipos.
+            data.cell.text = [texto];
+        },
+        margin: { top: 6, right: 6, bottom: 6, left: 6 }
+    });
+
+    const dataArquivo = new Date().toISOString().slice(0, 10);
+    doc.save(`consulta_${tipo}_${dataArquivo}.pdf`);
+    mostrarToast('PDF da consulta gerado com sucesso!');
+}
+
 function onChangeTipoConsulta() {
     const tipo = document.getElementById('tipoConsulta')?.value || '';
     const grupoBase = document.getElementById('filtroBaseProfGroup');
@@ -7601,7 +8628,7 @@ function gerarRelatorioProfessorPDF() {
     const horaPDF = agoraPDF.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
     const doc = new jsPDF({
-        orientation: 'portrait',
+        orientation: 'landscape',
         unit: 'mm',
         format: 'a4'
     });
@@ -7610,7 +8637,7 @@ function gerarRelatorioProfessorPDF() {
     const titulo = `HORÁRIO DO PROFESSOR - ${prof.nome.toUpperCase()} (${baseLabelProf})`;
     doc.setFontSize(10);
     doc.setFont(undefined, 'bold');
-    doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 26, {
+    doc.text(titulo, doc.internal.pageSize.getWidth() / 2, 18, {
         align: 'center',
         maxWidth: doc.internal.pageSize.getWidth() - 20
     });
@@ -7781,61 +8808,52 @@ function gerarRelatorioProfessorPDF() {
 
     doc.setFontSize(8);
     doc.setFont(undefined, 'normal');
-    doc.text(`Base: ${baseLabelPdf}`, 14, 30);
-    doc.text(`Disciplinas: ${disciplinasLabel}`, 14, 34);
+    doc.text(`Base: ${baseLabelPdf}`, 14, 22);
+    doc.text(`Disciplinas: ${disciplinasLabel}`, 14, 26);
 
     doc.autoTable({
         head,
         body,
-        startY: 36,
+        startY: 30,
         theme: 'grid',
         styles: {
-            fontSize: 9,
-            cellPadding: 2,
+            fontSize: 8.4,
+            cellPadding: 1.3,
             valign: 'middle',
             halign: 'center',
-            minCellHeight: 12
+            minCellHeight: 9,
+            overflow: 'linebreak'
         },
         headStyles: {
             fillColor: [52, 152, 219],
             textColor: 255,
             fontStyle: 'bold',
-            fontSize: 7,
+            fontSize: 8.2,
             cellPadding: 1,
-            minCellHeight: 6,
+            minCellHeight: 7,
             halign: 'center',
             valign: 'middle'
         },
         columnStyles: {
-            0: { cellWidth: 8, cellPadding: 0 },
-            1: { cellWidth: 10, cellPadding: 0 },
-            2: { cellWidth: 24, cellPadding: 1 },
-            3: { cellWidth: 16, cellPadding: 1 },
-            4: { cellWidth: 22 },
-            5: { cellWidth: 18 },
-            6: { cellWidth: 12 },
-            7: { cellWidth: 12 },
-            8: { cellWidth: 26, cellPadding: 1 },
-            9: { cellWidth: 12, cellPadding: 1 }
+            0: { cellWidth: 16 },
+            1: { cellWidth: 14 },
+            2: { cellWidth: 25 },
+            3: { cellWidth: 17 },
+            4: { cellWidth: 27 },
+            5: { cellWidth: 24 },
+            6: { cellWidth: 14 },
+            7: { cellWidth: 14 },
+            8: { cellWidth: 34 },
+            9: { cellWidth: 17 },
+            10: { cellWidth: 17 }
         },
         didParseCell: function(data) {
             if (!data || !data.cell) return;
 
             const colIdx = data.column.index;
-
-            if (data.section === 'head' &&
-                (colIdx === 0 || colIdx === 1) &&
-                data.cell.styles) {
-                data.cell.styles.fontSize = 6;
-            }
-
             if (data.section === 'body' && data.cell.styles) {
-                if (colIdx === 0) {
-                    data.cell.styles.fontSize = 8;
-                }
-                if (colIdx === 8 || colIdx === 9) {
-                    data.cell.styles.fontSize = 8;
-                }
+                if (colIdx === 4 || colIdx === 5 || colIdx === 8) data.cell.styles.halign = 'left';
+                if (colIdx === 0 || colIdx === 1) data.cell.styles.fontStyle = 'bold';
             }
         },
         didDrawCell: function(data) {
@@ -8780,6 +9798,39 @@ function gerarConsulta() {
 // BACKUP E RESTAURAÇÃO
 // =======================
 
+async function restaurarDoPostgres() {
+    if (!usuarioTemAcessoCompleto()) {
+        mostrarToast('Recurso disponível apenas para acesso admin123.', 'warning');
+        return;
+    }
+    if (!PERSISTENCIA_PG_ATIVA) {
+        mostrarToast('Persistência PostgreSQL não está ativa.', 'warning');
+        return;
+    }
+    if (!confirm('Restaurar os dados da nuvem e substituir os dados atuais do navegador?')) {
+        return;
+    }
+    try {
+        const escolaId = obterEscolaIdAtual();
+        const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/restaurar-backup`, { escolaId }, 8000);
+        if (!resposta || resposta.status !== 'ok' || !resposta.restaurou || !resposta.dados) {
+            mostrarToast('Nenhum dado disponível na nuvem para restauração.', 'warning');
+            return;
+        }
+        const aplicou = aplicarSnapshotPersistencia(resposta.dados);
+        if (!aplicou) {
+            mostrarToast('Dados da nuvem inválidos para restauração.', 'error');
+            return;
+        }
+        migrarEstruturaLocal();
+        salvarLocal();
+        mostrarToast('Dados restaurados da nuvem com sucesso.');
+        setTimeout(() => location.reload(), 120);
+    } catch (e) {
+        mostrarToast('Falha ao restaurar dados da nuvem.', 'error');
+    }
+}
+
 function exportarBackup() {
     const dados = {
         professores,
@@ -8797,13 +9848,13 @@ function exportarBackup() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `backup_horarios_${new Date().toISOString().split('T')[0]}.json`;
+    a.download = `dados_horarios_${new Date().toISOString().split('T')[0]}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
     
-    mostrarToast('Backup exportado com sucesso!');
+    mostrarToast('Dados exportados com sucesso!');
 }
 
 function importarBackup(event) {
@@ -8818,11 +9869,11 @@ function importarBackup(event) {
             
             // Valida estrutura básica
             if (!dados.professores || !dados.turmas || !dados.aulas) {
-                mostrarToast('Arquivo de backup inválido.', 'error');
+                mostrarToast('Arquivo de dados inválido.', 'error');
                 return;
             }
             
-            if (!confirm(`Importar backup com:\n• ${dados.professores.length} professor(es)\n• ${dados.turmas.length} turma(s)\n• ${dados.aulas.length} aula(s)\n\nIsso substituirá todos os dados atuais. Continuar?`)) {
+            if (!confirm(`Importar dados com:\n• ${dados.professores.length} professor(es)\n• ${dados.turmas.length} turma(s)\n• ${dados.aulas.length} aula(s)\n\nIsso substituirá todos os dados atuais. Continuar?`)) {
                 return;
             }
             
@@ -8851,8 +9902,8 @@ function importarBackup(event) {
             location.reload();
             
         } catch (error) {
-            console.error('Erro ao importar backup:', error);
-            mostrarToast('Erro ao importar backup. Arquivo corrompido.', 'error');
+            console.error('Erro ao importar dados:', error);
+            mostrarToast('Erro ao importar dados. Arquivo corrompido.', 'error');
         }
     };
     
@@ -8867,8 +9918,16 @@ function importarBackup(event) {
 // =======================
 
 document.addEventListener('DOMContentLoaded', () => {
+    inicializarTema();
+    const toggleTema = document.getElementById('toggleTemaEscuro');
+    if (toggleTema) {
+        toggleTema.addEventListener('change', () => {
+            aplicarTema(toggleTema.checked ? 'escuro' : 'claro');
+        });
+    }
     carregarLocal();
     migrarEstruturaLocal();
+    sincronizarInicialComPersistenciaPostgres();
 
     // formulários
     const loginCard = document.getElementById('loginCard');
@@ -8877,47 +9936,72 @@ document.addEventListener('DOMContentLoaded', () => {
     const mainContent = document.querySelector('.main-content');
 
     if (formLogin && mainContent && loginCard) {
-        mainContent.style.display = 'none';
-        formLogin.addEventListener('submit', (e) => {
-            e.preventDefault();
-            const login = document.getElementById('loginUsuario').value.trim();
-            const senha = document.getElementById('senhaUsuario').value.trim();
-            const user = autenticarUsuario(login, senha);
-            if (!user) {
-                if (loginHint) loginHint.textContent = 'Usuário ou senha inválidos.';
-                return;
-            }
-            usuarioLogado = user;
-            localStorage.setItem('usuarioAtual', JSON.stringify({
-                id: user.id,
-                role: user.role,
-                turno: user.turno || null,
-                nome: user.nome
-            }));
+        if (QRCODE_MODO_RESTRITO.ativo) {
             loginCard.style.display = 'none';
             mainContent.style.display = 'flex';
-            if (loginHint) loginHint.textContent = '';
-            aplicarPermissoesNaUI();
-            showSection('horarios');
-        });
-        const salvo = localStorage.getItem('usuarioAtual');
-        if (salvo) {
-            try {
-                const u = JSON.parse(salvo);
-                const match = USUARIOS_FIXOS.find(x => x.id === u.id);
-                if (match) {
-                    usuarioLogado = match;
-                    loginCard.style.display = 'none';
-                    mainContent.style.display = 'flex';
-                    aplicarPermissoesNaUI();
+            aplicarModoQrRestrito();
+        } else {
+            mainContent.style.display = 'none';
+            formLogin.addEventListener('submit', (e) => {
+                e.preventDefault();
+                const codigoEscola = normalizarCodigoEscola(document.getElementById('codigoEscolaLogin')?.value || '');
+                const login = document.getElementById('loginUsuario').value.trim();
+                const senha = document.getElementById('senhaUsuario').value.trim();
+                const auth = autenticarUsuario(codigoEscola, login, senha);
+                if (!auth) {
+                    if (loginHint) loginHint.textContent = 'Credenciais inválidas.';
+                    return;
                 }
-            } catch (e) {
+                const user = auth.usuario;
+                const tenant = auth.tenant;
+                usuarioLogado = user;
+                tenantAtual = tenant;
+                localStorage.setItem('usuarioAtual', JSON.stringify({
+                    id: user.id,
+                    tenantId: tenant.id,
+                    tenantCodigo: tenant.codigo,
+                    role: user.role,
+                    turno: user.turno || null,
+                    nome: user.nome
+                }));
+                loginCard.style.display = 'none';
+                mainContent.style.display = 'flex';
+                if (loginHint) loginHint.textContent = '';
+                carregarDadosTenantAtual();
+                aplicarPermissoesNaUI();
+                showSection('dashboard');
+            });
+            const salvo = localStorage.getItem('usuarioAtual');
+            if (salvo) {
+                try {
+                    const u = JSON.parse(salvo);
+                    const match = USUARIOS_FIXOS.find(x => x.id === u.id && (!u.tenantId || x.tenantId === u.tenantId));
+                    if (match) {
+                        const tenantMatch = TENANTS_FIXOS.find(t => t.id === match.tenantId) || null;
+                        usuarioLogado = match;
+                        tenantAtual = tenantMatch;
+                        loginCard.style.display = 'none';
+                        mainContent.style.display = 'flex';
+                        carregarDadosTenantAtual();
+                        aplicarPermissoesNaUI();
+                        showSection('dashboard');
+                    }
+                } catch (e) {
+                }
             }
         }
     }
 
     const formProfessor = document.getElementById('formProfessor');
     if (formProfessor) formProfessor.addEventListener('submit', salvarProfessor);
+    const chkCoordProf = document.getElementById('coordenadorAreaProfessor');
+    if (chkCoordProf) {
+        chkCoordProf.addEventListener('change', atualizarVisibilidadeCoordProfessor);
+    }
+    const chkCoordModalProf = document.getElementById('modalCoordenadorAreaProfessor');
+    if (chkCoordModalProf) {
+        chkCoordModalProf.addEventListener('change', atualizarVisibilidadeCoordProfessorModal);
+    }
 
     const formTurma = document.getElementById('formTurma');
     if (formTurma) formTurma.addEventListener('submit', salvarTurma);
@@ -8965,6 +10049,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // inicial
     preencherSelectCursos();
+    preencherListasCursosCoordProfessores();
+    atualizarVisibilidadeCoordProfessor();
+    atualizarVisibilidadeCoordProfessorModal();
     preencherSelectCursoVisual();
     atualizarListaProfessores();
     atualizarListaTurmas();
@@ -8987,6 +10074,11 @@ document.addEventListener('DOMContentLoaded', () => {
         chkMostrarInstrucoesEditor.addEventListener('change', () => mostrarHintEditorTurno());
         mostrarHintEditorTurno();
     }
+    const turnoRelatorio = document.getElementById('turnoRelatorio');
+    if (turnoRelatorio) {
+        turnoRelatorio.addEventListener('change', atualizarAvisoA3RelatorioTurno);
+    }
+    atualizarAvisoA3RelatorioTurno();
     atualizarIndicadorDesfazerTurno();
 
     const selTipoConsulta = document.getElementById('tipoConsulta');
@@ -9116,6 +10208,11 @@ function abrirModalProfessor(id) {
     if (dispCont) {
         renderDisponibilidade('modalDispProfessor', p.disponibilidadePorDia || null, diasSel, turnosSel, p.temposPorDiaTurno || null);
     }
+    const chkCoord = document.getElementById('modalCoordenadorAreaProfessor');
+    const inputAreaCoord = document.getElementById('modalAreaCoordenacaoProfessor');
+    if (chkCoord) chkCoord.checked = !!p.coordenadorArea;
+    if (inputAreaCoord) inputAreaCoord.value = p.areaCoordenacao || '';
+    atualizarVisibilidadeCoordProfessorModal();
     modal.style.display = 'flex';
 }
 
@@ -9133,8 +10230,16 @@ function salvarModalProfessor(e) {
     const discsStr = document.getElementById('modalProfDisciplinas').value;
     const cor = document.getElementById('modalProfCor').value || '#3498db';
     const baseValor = document.getElementById('modalBaseProfessor')?.value || 'TECNICA';
+    const coordenadorArea = !!document.getElementById('modalCoordenadorAreaProfessor')?.checked;
+    const areaCoordenacao = coordenadorArea
+        ? (document.getElementById('modalAreaCoordenacaoProfessor')?.value || '').trim()
+        : '';
     if (!nome) {
         mostrarToast('Informe o nome do professor.', 'warning');
+        return;
+    }
+    if (coordenadorArea && !areaCoordenacao) {
+        mostrarToast('Informe o curso/área de coordenação.', 'warning');
         return;
     }
     const corLower = cor.toLowerCase();
@@ -9171,6 +10276,8 @@ function salvarModalProfessor(e) {
         disciplinas: p.disciplinas,
         cor,
         baseTipo: baseValor,
+        coordenadorArea,
+        areaCoordenacao,
         diasDisponiveis: dias,
         turnosDisponiveis: turnos,
         disponibilidadePorDia: dispDiaTurno,
@@ -9211,6 +10318,8 @@ function salvarModalProfessor(e) {
     p.disciplinas = novoProf.disciplinas;
     p.cor = novoProf.cor;
     p.baseTipo = novoProf.baseTipo;
+    p.coordenadorArea = novoProf.coordenadorArea;
+    p.areaCoordenacao = novoProf.areaCoordenacao;
     p.diasDisponiveis = novoProf.diasDisponiveis;
     p.turnosDisponiveis = novoProf.turnosDisponiveis;
     p.disponibilidadePorDia = novoProf.disponibilidadePorDia;
