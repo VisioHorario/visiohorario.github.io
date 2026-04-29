@@ -9,6 +9,12 @@ const EM_AMBIENTE_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.ho
 const BACKEND_IA_URL = window.VISIO_IA_URL
     || (EM_AMBIENTE_LOCAL ? 'http://localhost:3001' : `${window.location.origin}/api`);
 const PERSISTENCIA_PG_ATIVA = true;
+const SUPABASE_URL = window.VISIO_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY = window.VISIO_SUPABASE_ANON_KEY || '';
+const SUPABASE_ATIVO = Boolean(window.supabase && SUPABASE_URL && SUPABASE_ANON_KEY);
+const supabaseClient = SUPABASE_ATIVO
+    ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+    : null;
 
 // Dias e turnos
 const DIAS_SEMANA = ['SEGUNDA', 'TERCA', 'QUARTA', 'QUINTA', 'SEXTA', 'SABADO'];
@@ -1803,7 +1809,115 @@ function autenticarUsuario(codigoEscola, login, senha) {
     return { usuario, tenant };
 }
 
+function mapearAuthSupabaseParaUsuarioApp(authUser, appUser) {
+    const role = appUser && appUser.role ? appUser.role : ROLES.ADMIN;
+    return {
+        id: appUser && appUser.id ? `sb_${appUser.id}` : `sb_${authUser.id}`,
+        nome: (appUser && appUser.name) || authUser.user_metadata?.name || authUser.email || 'Usuário',
+        login: (appUser && appUser.username) || authUser.email || '',
+        email: authUser.email || '',
+        role,
+        tenantId: appUser?.tenant_id || authUser.user_metadata?.tenant_id || null,
+        authUserId: authUser.id,
+        origem: 'SUPABASE'
+    };
+}
+
+async function autenticarUsuarioSupabase(codigoEscola, login, senha) {
+    if (!SUPABASE_ATIVO || !supabaseClient) return null;
+    const codigo = normalizarCodigoEscola(codigoEscola);
+    if (!codigo || !login || !senha) return null;
+
+    const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
+        email: login,
+        password: senha
+    });
+    if (signInError || !signInData || !signInData.user) {
+        return null;
+    }
+
+    const authUser = signInData.user;
+    const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
+    if (!tenantIdMeta) {
+        await supabaseClient.auth.signOut();
+        return null;
+    }
+
+    const { data: tenant, error: tenantError } = await supabaseClient
+        .from('tenants')
+        .select('id, code, name')
+        .eq('id', tenantIdMeta)
+        .maybeSingle();
+    if (tenantError || !tenant) {
+        await supabaseClient.auth.signOut();
+        return null;
+    }
+
+    if (normalizarCodigoEscola(tenant.code) !== codigo) {
+        await supabaseClient.auth.signOut();
+        return null;
+    }
+
+    const { data: appUser, error: appUserError } = await supabaseClient
+        .from('app_users')
+        .select('id, tenant_id, name, email, username, role, is_active')
+        .eq('auth_user_id', authUser.id)
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true)
+        .maybeSingle();
+    if (appUserError || !appUser) {
+        await supabaseClient.auth.signOut();
+        return null;
+    }
+
+    return {
+        usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
+        tenant: {
+            id: tenant.id,
+            codigo: normalizarCodigoEscola(tenant.code),
+            nome: tenant.name || `Escola ${tenant.code}`
+        }
+    };
+}
+
+async function restaurarSessaoSupabase() {
+    if (!SUPABASE_ATIVO || !supabaseClient) return null;
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error || !data || !data.session || !data.session.user) return null;
+    const authUser = data.session.user;
+    const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
+    if (!tenantIdMeta) return null;
+
+    const { data: tenant, error: tenantError } = await supabaseClient
+        .from('tenants')
+        .select('id, code, name')
+        .eq('id', tenantIdMeta)
+        .maybeSingle();
+    if (tenantError || !tenant) return null;
+
+    const { data: appUser, error: appUserError } = await supabaseClient
+        .from('app_users')
+        .select('id, tenant_id, name, email, username, role, is_active')
+        .eq('auth_user_id', authUser.id)
+        .eq('tenant_id', tenant.id)
+        .eq('is_active', true)
+        .maybeSingle();
+    if (appUserError || !appUser) return null;
+
+    return {
+        usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
+        tenant: {
+            id: tenant.id,
+            codigo: normalizarCodigoEscola(tenant.code),
+            nome: tenant.name || `Escola ${tenant.code}`
+        }
+    };
+}
+
 function usuarioTemAcessoCompleto() {
+    if (usuarioLogado && usuarioLogado.origem === 'SUPABASE') {
+        return usuarioLogado.role === ROLES.ADMIN;
+    }
     return !!(usuarioLogado && /admin_completo$/i.test(usuarioLogado.id));
 }
 
@@ -1903,6 +2017,9 @@ function atualizarAvisoA3RelatorioTurno() {
 }
 
 function sairSistema() {
+    if (SUPABASE_ATIVO && supabaseClient) {
+        supabaseClient.auth.signOut().catch(() => {});
+    }
     usuarioLogado = null;
     tenantAtual = null;
     resetarDadosEmMemoria();
@@ -6146,7 +6263,7 @@ function aplicarModoQrRestrito() {
     });
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     renderDisponibilidade('dispProfessor', null);
     aplicarModoQrRestrito();
 });
@@ -6444,7 +6561,7 @@ function fecharModalTempos() {
     if (modal) modal.style.display = 'none';
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const modal = document.getElementById('modalTempos');
     if (modal) {
         modal.addEventListener('click', (e) => {
@@ -6453,7 +6570,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     const cont = document.getElementById('modalDispProfessor');
     if (cont) {
         cont.addEventListener('change', () => {
@@ -9917,7 +10034,7 @@ function importarBackup(event) {
 // INICIALIZAÇÃO
 // =======================
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     inicializarTema();
     const toggleTema = document.getElementById('toggleTemaEscuro');
     if (toggleTema) {
@@ -9942,12 +10059,13 @@ document.addEventListener('DOMContentLoaded', () => {
             aplicarModoQrRestrito();
         } else {
             mainContent.style.display = 'none';
-            formLogin.addEventListener('submit', (e) => {
+            formLogin.addEventListener('submit', async (e) => {
                 e.preventDefault();
                 const codigoEscola = normalizarCodigoEscola(document.getElementById('codigoEscolaLogin')?.value || '');
                 const login = document.getElementById('loginUsuario').value.trim();
                 const senha = document.getElementById('senhaUsuario').value.trim();
-                const auth = autenticarUsuario(codigoEscola, login, senha);
+                const authSupabase = await autenticarUsuarioSupabase(codigoEscola, login, senha);
+                const auth = authSupabase || autenticarUsuario(codigoEscola, login, senha);
                 if (!auth) {
                     if (loginHint) loginHint.textContent = 'Credenciais inválidas.';
                     return;
@@ -9971,23 +10089,47 @@ document.addEventListener('DOMContentLoaded', () => {
                 aplicarPermissoesNaUI();
                 showSection('dashboard');
             });
-            const salvo = localStorage.getItem('usuarioAtual');
-            if (salvo) {
-                try {
-                    const u = JSON.parse(salvo);
-                    const match = USUARIOS_FIXOS.find(x => x.id === u.id && (!u.tenantId || x.tenantId === u.tenantId));
-                    if (match) {
-                        const tenantMatch = TENANTS_FIXOS.find(t => t.id === match.tenantId) || null;
-                        usuarioLogado = match;
-                        tenantAtual = tenantMatch;
-                        loginCard.style.display = 'none';
-                        mainContent.style.display = 'flex';
-                        carregarDadosTenantAtual();
-                        aplicarPermissoesNaUI();
-                        showSection('dashboard');
+            let sessaoRestaurada = false;
+            const authSessaoSupabase = await restaurarSessaoSupabase();
+            if (authSessaoSupabase) {
+                usuarioLogado = authSessaoSupabase.usuario;
+                tenantAtual = authSessaoSupabase.tenant;
+                localStorage.setItem('usuarioAtual', JSON.stringify({
+                    id: usuarioLogado.id,
+                    tenantId: tenantAtual.id,
+                    tenantCodigo: tenantAtual.codigo,
+                    role: usuarioLogado.role,
+                    turno: usuarioLogado.turno || null,
+                    nome: usuarioLogado.nome
+                }));
+                sessaoRestaurada = true;
+            } else {
+                const salvo = localStorage.getItem('usuarioAtual');
+                if (salvo) {
+                    try {
+                        const u = JSON.parse(salvo);
+                        const match = USUARIOS_FIXOS.find(x => x.id === u.id && (!u.tenantId || x.tenantId === u.tenantId));
+                        if (match) {
+                            const tenantMatch = TENANTS_FIXOS.find(t => t.id === match.tenantId) || null;
+                            usuarioLogado = match;
+                            tenantAtual = tenantMatch;
+                            sessaoRestaurada = true;
+                        }
+                    } catch (e) {
                     }
-                } catch (e) {
                 }
+            }
+
+            if (sessaoRestaurada) {
+                if (tenantAtual && tenantAtual.codigo) {
+                    const inputCodigoEscola = document.getElementById('codigoEscolaLogin');
+                    if (inputCodigoEscola) inputCodigoEscola.value = tenantAtual.codigo;
+                }
+                loginCard.style.display = 'none';
+                mainContent.style.display = 'flex';
+                carregarDadosTenantAtual();
+                aplicarPermissoesNaUI();
+                showSection('dashboard');
             }
         }
     }
