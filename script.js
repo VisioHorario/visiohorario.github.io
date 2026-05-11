@@ -931,9 +931,11 @@ function salvarLocal() {
         localStorage.setItem(obterChaveStorageTenant('apelidos_disciplinas'), JSON.stringify(apelidosDisciplinas));
         localStorage.setItem(obterChaveStorageTenant('ordem_turmas_turno'), JSON.stringify(ORDEM_TURMAS_POR_TURNO));
         dadosModificados = true;
-        agendarPersistenciaPostgres();
+        if (deveSincronizarNuvem()) {
+            agendarPersistenciaPostgres();
+        }
         atualizarDashboardRapidoSeVisivel();
-        mostrarToast('Dados salvos com sucesso!');
+        mostrarToast(deveSincronizarNuvem() ? 'Dados salvos (local + sincronização na nuvem).' : 'Dados salvos localmente.');
     } catch (e) {
         console.warn('Não foi possível salvar no localStorage', e);
         mostrarToast('Erro ao salvar dados', 'error');
@@ -1824,94 +1826,102 @@ function mapearAuthSupabaseParaUsuarioApp(authUser, appUser) {
 }
 
 async function autenticarUsuarioSupabase(codigoEscola, login, senha) {
-    if (!SUPABASE_ATIVO || !supabaseClient) return null;
-    const codigo = normalizarCodigoEscola(codigoEscola);
-    if (!codigo || !login || !senha) return null;
+    try {
+        if (!SUPABASE_ATIVO || !supabaseClient) return null;
+        const codigo = normalizarCodigoEscola(codigoEscola);
+        if (!codigo || !login || !senha) return null;
 
-    const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
-        email: login,
-        password: senha
-    });
-    if (signInError || !signInData || !signInData.user) {
-        return null;
-    }
-
-    const authUser = signInData.user;
-    const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
-    if (!tenantIdMeta) {
-        await supabaseClient.auth.signOut();
-        return null;
-    }
-
-    const { data: tenant, error: tenantError } = await supabaseClient
-        .from('tenants')
-        .select('id, code, name')
-        .eq('id', tenantIdMeta)
-        .maybeSingle();
-    if (tenantError || !tenant) {
-        await supabaseClient.auth.signOut();
-        return null;
-    }
-
-    if (normalizarCodigoEscola(tenant.code) !== codigo) {
-        await supabaseClient.auth.signOut();
-        return null;
-    }
-
-    const { data: appUser, error: appUserError } = await supabaseClient
-        .from('app_users')
-        .select('id, tenant_id, name, email, username, role, is_active')
-        .eq('auth_user_id', authUser.id)
-        .eq('tenant_id', tenant.id)
-        .eq('is_active', true)
-        .maybeSingle();
-    if (appUserError || !appUser) {
-        await supabaseClient.auth.signOut();
-        return null;
-    }
-
-    return {
-        usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
-        tenant: {
-            id: tenant.id,
-            codigo: normalizarCodigoEscola(tenant.code),
-            nome: tenant.name || `Escola ${tenant.code}`
+        const { data: signInData, error: signInError } = await supabaseClient.auth.signInWithPassword({
+            email: login,
+            password: senha
+        });
+        if (signInError || !signInData || !signInData.user) {
+            return null;
         }
-    };
+
+        const authUser = signInData.user;
+        const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
+        if (!tenantIdMeta) {
+            await supabaseClient.auth.signOut();
+            return null;
+        }
+
+        const { data: tenant, error: tenantError } = await supabaseClient
+            .from('tenants')
+            .select('id, code, name')
+            .eq('id', tenantIdMeta)
+            .maybeSingle();
+        if (tenantError || !tenant) {
+            await supabaseClient.auth.signOut();
+            return null;
+        }
+
+        if (normalizarCodigoEscola(tenant.code) !== codigo) {
+            await supabaseClient.auth.signOut();
+            return null;
+        }
+
+        const { data: appUser, error: appUserError } = await supabaseClient
+            .from('app_users')
+            .select('id, tenant_id, name, email, username, role, is_active')
+            .eq('auth_user_id', authUser.id)
+            .eq('tenant_id', tenant.id)
+            .eq('is_active', true)
+            .maybeSingle();
+        if (appUserError || !appUser) {
+            await supabaseClient.auth.signOut();
+            return null;
+        }
+
+        return {
+            usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
+            tenant: {
+                id: tenant.id,
+                codigo: normalizarCodigoEscola(tenant.code),
+                nome: tenant.name || `Escola ${tenant.code}`
+            }
+        };
+    } catch (e) {
+        return null;
+    }
 }
 
 async function restaurarSessaoSupabase() {
-    if (!SUPABASE_ATIVO || !supabaseClient) return null;
-    const { data, error } = await supabaseClient.auth.getSession();
-    if (error || !data || !data.session || !data.session.user) return null;
-    const authUser = data.session.user;
-    const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
-    if (!tenantIdMeta) return null;
+    try {
+        if (!SUPABASE_ATIVO || !supabaseClient) return null;
+        const { data, error } = await supabaseClient.auth.getSession();
+        if (error || !data || !data.session || !data.session.user) return null;
+        const authUser = data.session.user;
+        const tenantIdMeta = authUser.user_metadata?.tenant_id || null;
+        if (!tenantIdMeta) return null;
 
-    const { data: tenant, error: tenantError } = await supabaseClient
-        .from('tenants')
-        .select('id, code, name')
-        .eq('id', tenantIdMeta)
-        .maybeSingle();
-    if (tenantError || !tenant) return null;
+        const { data: tenant, error: tenantError } = await supabaseClient
+            .from('tenants')
+            .select('id, code, name')
+            .eq('id', tenantIdMeta)
+            .maybeSingle();
+        if (tenantError || !tenant) return null;
 
-    const { data: appUser, error: appUserError } = await supabaseClient
-        .from('app_users')
-        .select('id, tenant_id, name, email, username, role, is_active')
-        .eq('auth_user_id', authUser.id)
-        .eq('tenant_id', tenant.id)
-        .eq('is_active', true)
-        .maybeSingle();
-    if (appUserError || !appUser) return null;
+        const { data: appUser, error: appUserError } = await supabaseClient
+            .from('app_users')
+            .select('id, tenant_id, name, email, username, role, is_active')
+            .eq('auth_user_id', authUser.id)
+            .eq('tenant_id', tenant.id)
+            .eq('is_active', true)
+            .maybeSingle();
+        if (appUserError || !appUser) return null;
 
-    return {
-        usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
-        tenant: {
-            id: tenant.id,
-            codigo: normalizarCodigoEscola(tenant.code),
-            nome: tenant.name || `Escola ${tenant.code}`
-        }
-    };
+        return {
+            usuario: mapearAuthSupabaseParaUsuarioApp(authUser, appUser),
+            tenant: {
+                id: tenant.id,
+                codigo: normalizarCodigoEscola(tenant.code),
+                nome: tenant.name || `Escola ${tenant.code}`
+            }
+        };
+    } catch (e) {
+        return null;
+    }
 }
 
 function usuarioTemAcessoCompleto() {
@@ -2016,6 +2026,53 @@ function atualizarAvisoA3RelatorioTurno() {
     aviso.style.display = precisaA3 ? 'inline-flex' : 'none';
 }
 
+function atualizarEstadoTelaLogin(exibirLogin) {
+    const loginCard = document.getElementById('loginCard');
+    const mainContent = document.querySelector('.main-content');
+    if (loginCard) {
+        loginCard.style.display = exibirLogin ? '' : 'none';
+    }
+    if (mainContent) {
+        mainContent.style.display = exibirLogin ? 'none' : 'flex';
+    }
+}
+
+function limparSessaoNavegador() {
+    try {
+        localStorage.removeItem('usuarioAtual');
+    } catch (e) {
+    }
+    try {
+        const chaves = [];
+        for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k) chaves.push(k);
+        }
+        chaves.forEach(k => {
+            if (k.startsWith('sb-') && k.includes('auth-token')) {
+                try {
+                    localStorage.removeItem(k);
+                } catch (e) {
+                }
+            }
+        });
+    } catch (e) {
+    }
+    try {
+        if (SUPABASE_ATIVO && supabaseClient) {
+            supabaseClient.auth.signOut().catch(() => {});
+        }
+    } catch (e) {
+    }
+    usuarioLogado = null;
+    tenantAtual = null;
+    atualizarEstadoTelaLogin(true);
+    try {
+        location.reload();
+    } catch (e) {
+    }
+}
+
 function sairSistema() {
     if (SUPABASE_ATIVO && supabaseClient) {
         supabaseClient.auth.signOut().catch(() => {});
@@ -2027,18 +2084,11 @@ function sairSistema() {
         localStorage.removeItem('usuarioAtual');
     } catch (e) {
     }
-    const loginCard = document.getElementById('loginCard');
-    const mainContent = document.querySelector('.main-content');
     const loginHint = document.getElementById('loginHint');
     const inputCodigoEscola = document.getElementById('codigoEscolaLogin');
     const inputLogin = document.getElementById('loginUsuario');
     const inputSenha = document.getElementById('senhaUsuario');
-    if (mainContent) {
-        mainContent.style.display = 'none';
-    }
-    if (loginCard) {
-        loginCard.style.display = '';
-    }
+    atualizarEstadoTelaLogin(true);
     if (loginHint) {
         loginHint.textContent = '';
     }
@@ -2074,7 +2124,13 @@ function atualizarUIAposCargaTenant() {
 }
 
 function carregarDadosTenantAtual() {
-    resetarDadosEmMemoria();
+    if (!tenantAtual || !tenantAtual.id) {
+        resetarDadosEmMemoria();
+        atualizarUIAposCargaTenant();
+        return;
+    }
+    carregarLocal();
+    migrarEstruturaLocal();
     atualizarUIAposCargaTenant();
 }
 
@@ -5413,6 +5469,18 @@ function obterEscolaIdAtual() {
     return 'SEM_TENANT';
 }
 
+function deveSincronizarNuvem() {
+    return Boolean(
+        PERSISTENCIA_PG_ATIVA
+        && window.location.protocol !== 'file:'
+        && (typeof navigator === 'undefined' || navigator.onLine !== false)
+        && usuarioLogado
+        && usuarioLogado.origem === 'SUPABASE'
+        && tenantAtual
+        && tenantAtual.codigo
+    );
+}
+
 let persistenciaPgEmAndamento = false;
 let persistenciaPgPendente = false;
 let persistenciaPgTimer = null;
@@ -5475,7 +5543,7 @@ async function postJsonComTimeout(url, payload, timeoutMs) {
 }
 
 async function salvarPersistenciaPostgresAgora() {
-    if (!PERSISTENCIA_PG_ATIVA) return false;
+    if (!deveSincronizarNuvem()) return false;
     const escolaId = obterEscolaIdAtual();
     const dados = montarSnapshotPersistencia();
     try {
@@ -5504,7 +5572,7 @@ async function executarPersistenciaPostgresFila() {
 }
 
 function agendarPersistenciaPostgres() {
-    if (!PERSISTENCIA_PG_ATIVA) return;
+    if (!deveSincronizarNuvem()) return;
     if (persistenciaPgTimer) {
         clearTimeout(persistenciaPgTimer);
     }
@@ -5515,7 +5583,7 @@ function agendarPersistenciaPostgres() {
 }
 
 async function sincronizarInicialComPersistenciaPostgres() {
-    if (!PERSISTENCIA_PG_ATIVA) return;
+    if (!deveSincronizarNuvem()) return;
     if (possuiDadosLocais()) {
         agendarPersistenciaPostgres();
         return;
@@ -9920,8 +9988,8 @@ async function restaurarDoPostgres() {
         mostrarToast('Recurso disponível apenas para acesso admin123.', 'warning');
         return;
     }
-    if (!PERSISTENCIA_PG_ATIVA) {
-        mostrarToast('Persistência PostgreSQL não está ativa.', 'warning');
+    if (!deveSincronizarNuvem()) {
+        mostrarToast('Sincronização em nuvem indisponível. Faça login com conta Supabase.', 'warning');
         return;
     }
     if (!confirm('Restaurar os dados da nuvem e substituir os dados atuais do navegador?')) {
@@ -10034,7 +10102,8 @@ function importarBackup(event) {
 // INICIALIZAÇÃO
 // =======================
 
-document.addEventListener('DOMContentLoaded', async () => {
+async function inicializarAplicacao() {
+    atualizarEstadoTelaLogin(true);
     inicializarTema();
     const toggleTema = document.getElementById('toggleTemaEscuro');
     if (toggleTema) {
@@ -10042,55 +10111,112 @@ document.addEventListener('DOMContentLoaded', async () => {
             aplicarTema(toggleTema.checked ? 'escuro' : 'claro');
         });
     }
-    carregarLocal();
-    migrarEstruturaLocal();
-    sincronizarInicialComPersistenciaPostgres();
+    try {
+        carregarLocal();
+        migrarEstruturaLocal();
+        sincronizarInicialComPersistenciaPostgres();
+    } catch (e) {
+        atualizarEstadoTelaLogin(true);
+    }
 
     // formulários
     const loginCard = document.getElementById('loginCard');
     const formLogin = document.getElementById('formLogin');
     const loginHint = document.getElementById('loginHint');
     const mainContent = document.querySelector('.main-content');
+    const inputCodigoEscola = document.getElementById('codigoEscolaLogin');
+    const inputLogin = document.getElementById('loginUsuario');
+    const inputSenha = document.getElementById('senhaUsuario');
 
     if (formLogin && mainContent && loginCard) {
         if (QRCODE_MODO_RESTRITO.ativo) {
-            loginCard.style.display = 'none';
-            mainContent.style.display = 'flex';
+            atualizarEstadoTelaLogin(false);
             aplicarModoQrRestrito();
         } else {
-            mainContent.style.display = 'none';
+            atualizarEstadoTelaLogin(true);
+            if (inputCodigoEscola && !String(inputCodigoEscola.value || '').trim()) {
+                let codigoSalvo = '';
+                try {
+                    const salvo = localStorage.getItem('usuarioAtual');
+                    if (salvo) {
+                        const u = JSON.parse(salvo);
+                        codigoSalvo = normalizarCodigoEscola(u && u.tenantCodigo ? u.tenantCodigo : '');
+                    }
+                } catch (e) {
+                }
+                if (!codigoSalvo && window.location.protocol === 'file:') {
+                    codigoSalvo = 'ESC001';
+                }
+                if (codigoSalvo) {
+                    inputCodigoEscola.value = codigoSalvo;
+                }
+            }
             formLogin.addEventListener('submit', async (e) => {
                 e.preventDefault();
-                const codigoEscola = normalizarCodigoEscola(document.getElementById('codigoEscolaLogin')?.value || '');
-                const login = document.getElementById('loginUsuario').value.trim();
-                const senha = document.getElementById('senhaUsuario').value.trim();
-                const authSupabase = await autenticarUsuarioSupabase(codigoEscola, login, senha);
-                const auth = authSupabase || autenticarUsuario(codigoEscola, login, senha);
-                if (!auth) {
-                    if (loginHint) loginHint.textContent = 'Credenciais inválidas.';
-                    return;
+                try {
+                    if (loginHint) loginHint.textContent = '';
+                    let codigoEscola = normalizarCodigoEscola(inputCodigoEscola?.value || '');
+                    const login = String(inputLogin?.value || '').trim();
+                    const senha = String(inputSenha?.value || '').trim();
+                    if (!codigoEscola) {
+                        if (window.location.protocol === 'file:') {
+                            codigoEscola = 'ESC001';
+                            if (inputCodigoEscola) inputCodigoEscola.value = codigoEscola;
+                        } else {
+                            if (loginHint) loginHint.textContent = 'Informe o código da escola.';
+                            return;
+                        }
+                    }
+                    if (!login || !senha) {
+                        if (loginHint) loginHint.textContent = 'Informe usuário e senha.';
+                        return;
+                    }
+
+                    let authSupabase = null;
+                    const loginPareceEmail = login.includes('@');
+                    if (loginPareceEmail) {
+                        authSupabase = await autenticarUsuarioSupabase(codigoEscola, login, senha);
+                    }
+                    const auth = authSupabase || autenticarUsuario(codigoEscola, login, senha);
+                    if (!auth) {
+                        const tenantCheck = obterTenantPorCodigo(codigoEscola);
+                        if (!tenantCheck) {
+                            if (loginHint) loginHint.textContent = 'Código da escola inválido.';
+                        } else {
+                            if (loginHint) loginHint.textContent = 'Credenciais inválidas.';
+                        }
+                        return;
+                    }
+                    const user = auth.usuario;
+                    const tenant = auth.tenant;
+                    usuarioLogado = user;
+                    tenantAtual = tenant;
+                    localStorage.setItem('usuarioAtual', JSON.stringify({
+                        id: user.id,
+                        tenantId: tenant.id,
+                        tenantCodigo: tenant.codigo,
+                        role: user.role,
+                        turno: user.turno || null,
+                        nome: user.nome
+                    }));
+                    atualizarEstadoTelaLogin(false);
+                    if (loginHint) loginHint.textContent = '';
+                    carregarDadosTenantAtual();
+                    aplicarPermissoesNaUI();
+                    showSection('dashboard');
+                } catch (err) {
+                    console.error('Erro no login:', err);
+                    if (loginHint) loginHint.textContent = 'Erro interno no login. Clique em "Limpar sessão" e tente novamente.';
+                    atualizarEstadoTelaLogin(true);
                 }
-                const user = auth.usuario;
-                const tenant = auth.tenant;
-                usuarioLogado = user;
-                tenantAtual = tenant;
-                localStorage.setItem('usuarioAtual', JSON.stringify({
-                    id: user.id,
-                    tenantId: tenant.id,
-                    tenantCodigo: tenant.codigo,
-                    role: user.role,
-                    turno: user.turno || null,
-                    nome: user.nome
-                }));
-                loginCard.style.display = 'none';
-                mainContent.style.display = 'flex';
-                if (loginHint) loginHint.textContent = '';
-                carregarDadosTenantAtual();
-                aplicarPermissoesNaUI();
-                showSection('dashboard');
             });
             let sessaoRestaurada = false;
-            const authSessaoSupabase = await restaurarSessaoSupabase();
+            let authSessaoSupabase = null;
+            try {
+                authSessaoSupabase = await restaurarSessaoSupabase();
+            } catch (e2) {
+                authSessaoSupabase = null;
+            }
             if (authSessaoSupabase) {
                 usuarioLogado = authSessaoSupabase.usuario;
                 tenantAtual = authSessaoSupabase.tenant;
@@ -10125,8 +10251,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const inputCodigoEscola = document.getElementById('codigoEscolaLogin');
                     if (inputCodigoEscola) inputCodigoEscola.value = tenantAtual.codigo;
                 }
-                loginCard.style.display = 'none';
-                mainContent.style.display = 'flex';
+                atualizarEstadoTelaLogin(false);
                 carregarDadosTenantAtual();
                 aplicarPermissoesNaUI();
                 showSection('dashboard');
@@ -10322,7 +10447,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     
     mostrarToast('Sistema carregado com sucesso!', 'success');
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        inicializarAplicacao();
+    });
+} else {
+    inicializarAplicacao();
+}
 
 function abrirModalProfessor(id) {
     const p = professores.find(px => px.id === id);

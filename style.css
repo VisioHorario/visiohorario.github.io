@@ -148,7 +148,7 @@ header {
 }
 
 .main-content {
-    display: flex;
+    display: none;
     flex-direction: column;
     gap: 0;
     background: rgba(255, 255, 255, 0.88);
