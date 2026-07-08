@@ -6,6 +6,8 @@
 const APP_PREFIX = 'horarios_escola_';
 const CHAVE_TEMA = `${APP_PREFIX}tema`;
 const EM_AMBIENTE_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname);
+const EM_MODO_ARQUIVO_LOCAL = window.location.protocol === 'file:';
+const AUTH_LOCAL_HABILITADA = EM_MODO_ARQUIVO_LOCAL || EM_AMBIENTE_LOCAL;
 const BACKEND_IA_URL = window.VISIO_IA_URL
     || (EM_AMBIENTE_LOCAL ? 'http://localhost:3001' : `${window.location.origin}/api`);
 const PERSISTENCIA_PG_ATIVA = true;
@@ -1796,12 +1798,14 @@ function normalizarCodigoEscola(codigo) {
 }
 
 function obterTenantPorCodigo(codigoEscola) {
+    if (!AUTH_LOCAL_HABILITADA) return null;
     const codigo = normalizarCodigoEscola(codigoEscola);
     if (!codigo) return null;
     return TENANTS_FIXOS.find(t => t.codigo === codigo) || null;
 }
 
 function autenticarUsuario(codigoEscola, login, senha) {
+    if (!AUTH_LOCAL_HABILITADA) return null;
     const tenant = obterTenantPorCodigo(codigoEscola);
     if (!tenant) return null;
     const usuario = USUARIOS_FIXOS.find(
@@ -5523,6 +5527,15 @@ function possuiDadosLocais() {
     return professores.length > 0 || turmas.length > 0 || aulas.length > 0;
 }
 
+function usaPersistenciaSupabase() {
+    return Boolean(deveSincronizarNuvem() && SUPABASE_ATIVO && supabaseClient && tenantAtual && tenantAtual.id);
+}
+
+function backendIaDisponivel() {
+    if (EM_MODO_ARQUIVO_LOCAL || EM_AMBIENTE_LOCAL) return true;
+    return Boolean(window.VISIO_IA_URL);
+}
+
 async function postJsonComTimeout(url, payload, timeoutMs) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -5544,9 +5557,19 @@ async function postJsonComTimeout(url, payload, timeoutMs) {
 
 async function salvarPersistenciaPostgresAgora() {
     if (!deveSincronizarNuvem()) return false;
-    const escolaId = obterEscolaIdAtual();
     const dados = montarSnapshotPersistencia();
     try {
+        if (usaPersistenciaSupabase()) {
+            const { error } = await supabaseClient
+                .from('visio_snapshots')
+                .upsert({
+                    tenant_id: tenantAtual.id,
+                    payload: dados,
+                    updated_at: new Date().toISOString()
+                }, { onConflict: 'tenant_id' });
+            return !error;
+        }
+        const escolaId = obterEscolaIdAtual();
         const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/salvar`, { escolaId, dados }, 4000);
         return Boolean(resposta && resposta.status === 'ok');
     } catch (e) {
@@ -5584,11 +5607,30 @@ function agendarPersistenciaPostgres() {
 
 async function sincronizarInicialComPersistenciaPostgres() {
     if (!deveSincronizarNuvem()) return;
-    if (possuiDadosLocais()) {
-        agendarPersistenciaPostgres();
-        return;
-    }
     try {
+        if (usaPersistenciaSupabase()) {
+            const { data, error } = await supabaseClient
+                .from('visio_snapshots')
+                .select('payload, updated_at')
+                .eq('tenant_id', tenantAtual.id)
+                .maybeSingle();
+            if (!error && data && data.payload) {
+                const aplicou = aplicarSnapshotPersistencia(data.payload);
+                if (aplicou) {
+                    migrarEstruturaLocal();
+                    salvarLocal();
+                    return;
+                }
+            }
+            if (possuiDadosLocais()) {
+                agendarPersistenciaPostgres();
+            }
+            return;
+        }
+        if (possuiDadosLocais()) {
+            agendarPersistenciaPostgres();
+            return;
+        }
         const escolaId = obterEscolaIdAtual();
         const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/carregar`, { escolaId }, 4000);
         if (!resposta || resposta.status !== 'ok' || !resposta.encontrou || !resposta.dados) {
@@ -5620,6 +5662,9 @@ function montarPayloadAjusteIA(turno) {
 }
 
 function solicitarAjusteIABackend(payload) {
+    if (!backendIaDisponivel()) {
+        return Promise.resolve(null);
+    }
     return fetch(`${BACKEND_IA_URL}/ajuste-ia`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -9996,6 +10041,27 @@ async function restaurarDoPostgres() {
         return;
     }
     try {
+        if (usaPersistenciaSupabase()) {
+            const { data, error } = await supabaseClient
+                .from('visio_snapshots')
+                .select('payload, updated_at')
+                .eq('tenant_id', tenantAtual.id)
+                .maybeSingle();
+            if (error || !data || !data.payload) {
+                mostrarToast('Nenhum dado disponível na nuvem para restauração.', 'warning');
+                return;
+            }
+            const aplicouSupabase = aplicarSnapshotPersistencia(data.payload);
+            if (!aplicouSupabase) {
+                mostrarToast('Dados da nuvem inválidos para restauração.', 'error');
+                return;
+            }
+            migrarEstruturaLocal();
+            salvarLocal();
+            mostrarToast('Dados restaurados da nuvem com sucesso.');
+            setTimeout(() => location.reload(), 120);
+            return;
+        }
         const escolaId = obterEscolaIdAtual();
         const resposta = await postJsonComTimeout(`${BACKEND_IA_URL}/persistencia/restaurar-backup`, { escolaId }, 8000);
         if (!resposta || resposta.status !== 'ok' || !resposta.restaurou || !resposta.dados) {
@@ -10174,13 +10240,17 @@ async function inicializarAplicacao() {
 
                     let authSupabase = null;
                     const loginPareceEmail = login.includes('@');
+                    if (!loginPareceEmail && !AUTH_LOCAL_HABILITADA) {
+                        if (loginHint) loginHint.textContent = 'Na versão web, use o e-mail cadastrado no Supabase.';
+                        return;
+                    }
                     if (loginPareceEmail) {
                         authSupabase = await autenticarUsuarioSupabase(codigoEscola, login, senha);
                     }
                     const auth = authSupabase || autenticarUsuario(codigoEscola, login, senha);
                     if (!auth) {
-                        const tenantCheck = obterTenantPorCodigo(codigoEscola);
-                        if (!tenantCheck) {
+                        const tenantCheck = AUTH_LOCAL_HABILITADA ? obterTenantPorCodigo(codigoEscola) : { codigo: codigoEscola };
+                        if (!tenantCheck && !loginPareceEmail) {
                             if (loginHint) loginHint.textContent = 'Código da escola inválido.';
                         } else {
                             if (loginHint) loginHint.textContent = 'Credenciais inválidas.';
@@ -10201,6 +10271,7 @@ async function inicializarAplicacao() {
                     }));
                     atualizarEstadoTelaLogin(false);
                     if (loginHint) loginHint.textContent = '';
+                    await sincronizarInicialComPersistenciaPostgres();
                     carregarDadosTenantAtual();
                     aplicarPermissoesNaUI();
                     showSection('dashboard');
@@ -10231,7 +10302,7 @@ async function inicializarAplicacao() {
                 sessaoRestaurada = true;
             } else {
                 const salvo = localStorage.getItem('usuarioAtual');
-                if (salvo) {
+                if (AUTH_LOCAL_HABILITADA && salvo) {
                     try {
                         const u = JSON.parse(salvo);
                         const match = USUARIOS_FIXOS.find(x => x.id === u.id && (!u.tenantId || x.tenantId === u.tenantId));
@@ -10252,6 +10323,7 @@ async function inicializarAplicacao() {
                     if (inputCodigoEscola) inputCodigoEscola.value = tenantAtual.codigo;
                 }
                 atualizarEstadoTelaLogin(false);
+                await sincronizarInicialComPersistenciaPostgres();
                 carregarDadosTenantAtual();
                 aplicarPermissoesNaUI();
                 showSection('dashboard');
