@@ -7,7 +7,8 @@ const APP_PREFIX = 'horarios_escola_';
 const CHAVE_TEMA = `${APP_PREFIX}tema`;
 const EM_AMBIENTE_LOCAL = ['localhost', '127.0.0.1'].includes(window.location.hostname);
 const EM_MODO_ARQUIVO_LOCAL = window.location.protocol === 'file:';
-const AUTH_LOCAL_HABILITADA = EM_MODO_ARQUIVO_LOCAL || EM_AMBIENTE_LOCAL;
+// Mantém o acesso admin/admin e admin123/admin123 disponível também na versão publicada.
+const AUTH_LOCAL_HABILITADA = true;
 const BACKEND_IA_URL = window.VISIO_IA_URL
     || (EM_AMBIENTE_LOCAL ? 'http://localhost:3001' : `${window.location.origin}/api`);
 const PERSISTENCIA_PG_ATIVA = true;
