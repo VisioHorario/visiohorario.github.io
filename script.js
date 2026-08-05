@@ -10679,7 +10679,7 @@ function salvarModalProfessor(e) {
     mostrarToast('Professor atualizado com sucesso!');
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function inicializarModaisEdicao() {
     const formModalProf = document.getElementById('formModalProfessor');
     if (formModalProf) {
         formModalProf.addEventListener('submit', salvarModalProfessor);
@@ -10700,7 +10700,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (e.target === modalTurma) fecharModalTurma();
         });
     }
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        inicializarModaisEdicao();
+    });
+} else {
+    inicializarModaisEdicao();
+}
 
 function renderDisponibilidade(containerId, dados = null, diasLegacy = [], turnosLegacy = [], temposMap = null) {
     const cont = document.getElementById(containerId);
