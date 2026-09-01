@@ -66,6 +66,15 @@
                         Organize professores, turmas e turnos em poucos cliques.
                     </text>
                 </svg>
+                <div class="floating-theme-toggle">
+                    <label class="theme-toggle" for="toggleTemaEscuro" title="Alternar tema claro/escuro" aria-label="Alternar tema claro ou escuro">
+                        <input type="checkbox" id="toggleTemaEscuro">
+                        <span class="theme-toggle-icon theme-toggle-icon-sun" aria-hidden="true">☀</span>
+                        <span class="theme-toggle-slider"></span>
+                        <span class="theme-toggle-icon theme-toggle-icon-moon" aria-hidden="true">🌙</span>
+                        <span class="theme-toggle-label" id="toggleTemaLabel">Tema claro</span>
+                    </label>
+                </div>
             </div>
         </div>
     </header>
@@ -102,6 +111,7 @@
     <div class="main-content">
         <nav class="sidebar">
             <button class="menu-btn active" onclick="showSection('dashboard')">📊 Dashboard</button>
+            <button class="menu-btn" id="btnMenuUsuarios" onclick="showSection('usuarios')">👥 Usuários</button>
             <button class="menu-btn" onclick="showSection('professores')">👨‍🏫 Professores</button>
             <button class="menu-btn" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
             <button class="menu-btn" onclick="showSection('horarios')">📅 Editor de Horários</button>
@@ -115,11 +125,6 @@
                 <div class="card">
                     <div class="dashboard-top">
                         <h3>Visão Geral</h3>
-                        <label class="theme-toggle" for="toggleTemaEscuro">
-                            <input type="checkbox" id="toggleTemaEscuro">
-                            <span class="theme-toggle-slider"></span>
-                            <span class="theme-toggle-label" id="toggleTemaLabel">Tema claro</span>
-                        </label>
                     </div>
                     <div class="dashboard-kpis">
                         <div class="dashboard-kpi kpi-aulas">
@@ -203,6 +208,86 @@
                             </table>
                         </div>
                     </div>
+                </div>
+            </section>
+
+            <!-- ================= USUÁRIOS ================= -->
+            <section id="usuarios" class="section">
+                <h2>Usuários da Escola</h2>
+
+                <div class="card">
+                    <h3>Cadastrar / Editar Usuário</h3>
+                    <p class="hint" id="usuariosAdminHint">
+                        Cadastre usuários vinculados a esta escola e defina o perfil de acesso.
+                    </p>
+                    <form id="formUsuarioAdmin" class="form-grid">
+                        <input type="hidden" id="usuarioAdminAuthId">
+                        <div class="form-group">
+                            <label for="usuarioAdminNome">Nome</label>
+                            <input type="text" id="usuarioAdminNome" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="usuarioAdminEmail">E-mail</label>
+                            <input type="email" id="usuarioAdminEmail" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="usuarioAdminUsername">Login interno</label>
+                            <input type="text" id="usuarioAdminUsername" placeholder="Ex.: admin.turno">
+                        </div>
+                        <div class="form-group">
+                            <label for="usuarioAdminRole">Perfil</label>
+                            <select id="usuarioAdminRole" required>
+                                <option value="ADMIN">Administrador</option>
+                                <option value="COORD_TURNO">Coordenador de turno</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="grupoUsuarioAdminTurno" style="display:none;">
+                            <label for="usuarioAdminTurno">Turno do coordenador</label>
+                            <select id="usuarioAdminTurno">
+                                <option value="">Selecione...</option>
+                                <option value="MANHA">Manhã</option>
+                                <option value="TARDE">Tarde</option>
+                                <option value="NOITE">Noite</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="usuarioAdminSenha">Senha</label>
+                            <input type="password" id="usuarioAdminSenha" placeholder="Obrigatória no cadastro; opcional na edição">
+                        </div>
+                        <div class="form-group">
+                            <label style="display:inline-flex; align-items:center; gap:8px;">
+                                <input type="checkbox" id="usuarioAdminAtivo" checked>
+                                Usuário ativo
+                            </label>
+                        </div>
+                        <div class="form-group full-row">
+                            <div class="inline-group">
+                                <button type="submit" class="btn-primary">💾 Salvar Usuário</button>
+                                <button type="button" class="btn-secondary" onclick="limparFormularioUsuarioAdmin()">Limpar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-inline">
+                        <h3>Usuários Cadastrados</h3>
+                        <button type="button" class="btn-secondary small" onclick="carregarUsuariosEscola()">Atualizar</button>
+                    </div>
+                    <table class="tabela-padrao">
+                        <thead>
+                        <tr>
+                            <th>Nome</th>
+                            <th>E-mail</th>
+                            <th>Login</th>
+                            <th>Perfil</th>
+                            <th>Turno</th>
+                            <th>Status</th>
+                            <th>Ações</th>
+                        </tr>
+                        </thead>
+                        <tbody id="listaUsuariosAdmin"></tbody>
+                    </table>
                 </div>
             </section>
 
@@ -487,7 +572,10 @@
                 </div>
 
                 <div class="card">
-                    <h3>Editor Visual (Cadastro Rápido)</h3>
+                    <div class="card-header-inline">
+                        <h3>Editor Visual (Cadastro Rápido)</h3>
+                        <button type="button" class="btn-secondary small" onclick="abrirModalTempos()">⚙️ Tempos do turno</button>
+                    </div>
                     <p id="editorTurnoHint" class="hint editor-turno-hint">
                         <label class="editor-hint-toggle">
                             <input type="checkbox" id="chkMostrarInstrucoesEditor">
@@ -711,7 +799,7 @@
                 
                 <div id="modalTempos" class="modal">
                     <div class="modal-content modal-tempos">
-                        <h3>Tempos por Turno</h3>
+                        <h3 class="modal-tempos-title">Tempos por Turno</h3>
                         <div class="form-grid">
                             <div class="form-group">
                                 <label>Turno:</label>

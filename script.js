@@ -93,6 +93,8 @@ const ROLES = {
     COORD_TURNO: 'COORD_TURNO'
 };
 
+const TURNOS_USUARIO = ['MANHA', 'TARDE', 'NOITE'];
+
 const TENANTS_FIXOS = [
     { id: 'esc001', codigo: 'ESC001', nome: 'Escola 001' },
     { id: 'esc002', codigo: 'ESC002', nome: 'Escola 002' }
@@ -135,6 +137,7 @@ const USUARIOS_FIXOS = [
 
 let usuarioLogado = null;
 let tenantAtual = null;
+let usuariosEscolaCache = [];
 
 let turnoAtualGrade = 'MANHA';
 let modoVisualGrade = 'TURNO';
@@ -235,13 +238,7 @@ function abrirMenuContextoGrade(ev, td) {
     }
     if (!menuContextoGrade) {
         menuContextoGrade = document.createElement('div');
-        menuContextoGrade.style.position = 'fixed';
-        menuContextoGrade.style.zIndex = '9999';
-        menuContextoGrade.style.background = '#ffffff';
-        menuContextoGrade.style.border = '1px solid #ccc';
-        menuContextoGrade.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
-        menuContextoGrade.style.minWidth = '140px';
-        menuContextoGrade.style.fontSize = '0.85rem';
+        menuContextoGrade.className = 'menu-contexto-grade';
         document.body.appendChild(menuContextoGrade);
     }
     const destinos = gradeCelulasSelecionadas.length ? [...gradeCelulasSelecionadas] : [td];
@@ -252,16 +249,8 @@ function abrirMenuContextoGrade(ev, td) {
     const podeColar = clipboardAulas && clipboardAulas.length > 0;
     const criarItem = (rotulo, habilitado, acao) => {
         const item = document.createElement('div');
+        item.className = `menu-contexto-grade-item ${habilitado ? 'is-enabled' : 'is-disabled'}`;
         item.textContent = rotulo;
-        item.style.padding = '6px 10px';
-        item.style.cursor = habilitado ? 'pointer' : 'default';
-        item.style.color = habilitado ? '#333' : '#aaa';
-        item.onmouseenter = () => {
-            if (habilitado) item.style.background = '#f0f0f0';
-        };
-        item.onmouseleave = () => {
-            item.style.background = 'transparent';
-        };
         if (habilitado) {
             item.onclick = () => {
                 fecharMenuContextoGrade();
@@ -1824,6 +1813,7 @@ function mapearAuthSupabaseParaUsuarioApp(authUser, appUser) {
         login: (appUser && appUser.username) || authUser.email || '',
         email: authUser.email || '',
         role,
+        turno: appUser?.shift || authUser.user_metadata?.shift || null,
         tenantId: appUser?.tenant_id || authUser.user_metadata?.tenant_id || null,
         authUserId: authUser.id,
         origem: 'SUPABASE'
@@ -1868,7 +1858,7 @@ async function autenticarUsuarioSupabase(codigoEscola, login, senha) {
 
         const { data: appUser, error: appUserError } = await supabaseClient
             .from('app_users')
-            .select('id, tenant_id, name, email, username, role, is_active')
+            .select('id, tenant_id, name, email, username, role, shift, is_active')
             .eq('auth_user_id', authUser.id)
             .eq('tenant_id', tenant.id)
             .eq('is_active', true)
@@ -1909,7 +1899,7 @@ async function restaurarSessaoSupabase() {
 
         const { data: appUser, error: appUserError } = await supabaseClient
             .from('app_users')
-            .select('id, tenant_id, name, email, username, role, is_active')
+            .select('id, tenant_id, name, email, username, role, shift, is_active')
             .eq('auth_user_id', authUser.id)
             .eq('tenant_id', tenant.id)
             .eq('is_active', true)
@@ -1936,11 +1926,45 @@ function usuarioTemAcessoCompleto() {
     return !!(usuarioLogado && /admin_completo$/i.test(usuarioLogado.id));
 }
 
+function usuarioPodeGerirUsuarios() {
+    return Boolean(
+        usuarioLogado
+        && usuarioLogado.origem === 'SUPABASE'
+        && usuarioLogado.role === ROLES.ADMIN
+        && tenantAtual
+        && tenantAtual.id
+    );
+}
+
+function textoRoleUsuario(role) {
+    if (role === ROLES.COORD_TURNO) return 'Coordenador de turno';
+    return 'Administrador';
+}
+
+function textoStatusUsuarioApp(isActive) {
+    return isActive ? 'Ativo' : 'Inativo';
+}
+
+function textoTurnoUsuario(turno) {
+    return turno ? textoTurno(turno) : '-';
+}
+
+function escapeHtml(valor) {
+    return String(valor == null ? '' : valor)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function aplicarPermissoesNaUI() {
     const menuBtns = Array.from(document.querySelectorAll('.menu-btn'));
+    const btnUsuarios = document.getElementById('btnMenuUsuarios');
     const btnRelatorios = menuBtns.find(b => b.textContent.includes('Relatórios'));
     const btnConsultas = menuBtns.find(b => b.textContent.includes('Consultas'));
     if (!usuarioLogado) {
+        if (btnUsuarios) btnUsuarios.style.display = 'none';
         if (btnRelatorios) btnRelatorios.style.display = 'none';
         if (btnConsultas) btnConsultas.style.display = 'none';
         const blocoTempoVago = document.getElementById('profRelatorioMostrarVagos')?.closest('.form-group');
@@ -1950,6 +1974,9 @@ function aplicarPermissoesNaUI() {
         if (blocoGraficos) blocoGraficos.style.display = 'none';
         if (charts) charts.style.display = 'none';
         return;
+    }
+    if (btnUsuarios) {
+        btnUsuarios.style.display = usuarioPodeGerirUsuarios() ? '' : 'none';
     }
     if (btnRelatorios) btnRelatorios.style.display = '';
     const blocoTempoVago = document.getElementById('profRelatorioMostrarVagos')?.closest('.form-group');
@@ -2143,6 +2170,10 @@ function showSection(id) {
     if (QRCODE_MODO_RESTRITO.ativo && id !== 'relatorios') {
         return;
     }
+    if (id === 'usuarios' && !usuarioPodeGerirUsuarios()) {
+        mostrarToast('Somente administradores autenticados no Supabase podem gerenciar usuários.', 'warning');
+        return;
+    }
     document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
     document.getElementById(id).classList.add('active');
 
@@ -2162,6 +2193,255 @@ function showSection(id) {
     }
     if (id === 'dashboard') {
         renderDashboardRapido();
+    }
+    if (id === 'usuarios') {
+        carregarUsuariosEscola();
+    }
+}
+
+function inicializarFormularioProfessorPrincipal() {
+    renderDisponibilidade('dispProfessor', null);
+    const hiddenBase = document.getElementById('baseProfessor');
+    const chipsBase = document.querySelectorAll('#chips-base-prof .chip');
+    if (hiddenBase && !hiddenBase.value) {
+        hiddenBase.value = 'TECNICA';
+    }
+    chipsBase.forEach(chip => {
+        chip.classList.toggle('selecionado', chip.getAttribute('data-value') === (hiddenBase?.value || 'TECNICA'));
+    });
+}
+
+function resetarFormularioProfessorPrincipal() {
+    const form = document.getElementById('formProfessor');
+    if (form) form.reset();
+    document.getElementById('professorId').value = '';
+    const apelidoProfInput = document.getElementById('apelidoProfessorDisciplina');
+    if (apelidoProfInput) {
+        apelidoProfInput.value = '';
+        delete apelidoProfInput.dataset.manual;
+    }
+    const chkCoord = document.getElementById('coordenadorAreaProfessor');
+    if (chkCoord) chkCoord.checked = false;
+    const inputArea = document.getElementById('areaCoordenacaoProfessor');
+    if (inputArea) inputArea.value = '';
+    const hiddenBase = document.getElementById('baseProfessor');
+    if (hiddenBase) hiddenBase.value = 'TECNICA';
+    document.querySelectorAll('#chips-base-prof .chip').forEach(chip => {
+        chip.classList.toggle('selecionado', chip.getAttribute('data-value') === 'TECNICA');
+    });
+    atualizarVisibilidadeCoordProfessor();
+    renderDisponibilidade('dispProfessor', null);
+}
+
+async function obterTokenAcessoSupabaseAtual() {
+    if (!SUPABASE_ATIVO || !supabaseClient) return null;
+    const { data, error } = await supabaseClient.auth.getSession();
+    if (error || !data || !data.session) return null;
+    return data.session.access_token || null;
+}
+
+async function chamarApiUsuarios(caminho, options = {}) {
+    const token = await obterTokenAcessoSupabaseAtual();
+    if (!token) {
+        throw new Error('Sua sessão do Supabase expirou. Entre novamente para continuar.');
+    }
+    const method = options.method || 'GET';
+    const headers = {
+        'Authorization': `Bearer ${token}`
+    };
+    if (options.body !== undefined) {
+        headers['Content-Type'] = 'application/json';
+    }
+    const resposta = await fetch(caminho, {
+        method,
+        headers,
+        body: options.body !== undefined ? JSON.stringify(options.body) : undefined
+    });
+    const texto = await resposta.text();
+    let dados = {};
+    try {
+        dados = texto ? JSON.parse(texto) : {};
+    } catch (e) {
+        dados = { error: texto || 'Resposta inválida do servidor.' };
+    }
+    if (!resposta.ok) {
+        throw new Error(dados.error || 'Não foi possível concluir a operação com usuários.');
+    }
+    return dados;
+}
+
+function atualizarVisibilidadeTurnoUsuarioAdmin() {
+    const role = document.getElementById('usuarioAdminRole')?.value || ROLES.ADMIN;
+    const grupoTurno = document.getElementById('grupoUsuarioAdminTurno');
+    const selectTurno = document.getElementById('usuarioAdminTurno');
+    const exibirTurno = role === ROLES.COORD_TURNO;
+    if (grupoTurno) {
+        grupoTurno.style.display = exibirTurno ? '' : 'none';
+    }
+    if (selectTurno) {
+        selectTurno.required = exibirTurno;
+        if (!exibirTurno) {
+            selectTurno.value = '';
+        }
+    }
+}
+
+function limparFormularioUsuarioAdmin() {
+    const form = document.getElementById('formUsuarioAdmin');
+    if (form) form.reset();
+    const hidden = document.getElementById('usuarioAdminAuthId');
+    if (hidden) hidden.value = '';
+    const ativo = document.getElementById('usuarioAdminAtivo');
+    if (ativo) ativo.checked = true;
+    const role = document.getElementById('usuarioAdminRole');
+    if (role) role.value = ROLES.ADMIN;
+    atualizarVisibilidadeTurnoUsuarioAdmin();
+}
+
+function preencherFormularioUsuarioAdmin(usuario) {
+    document.getElementById('usuarioAdminAuthId').value = usuario.auth_user_id || '';
+    document.getElementById('usuarioAdminNome').value = usuario.name || '';
+    document.getElementById('usuarioAdminEmail').value = usuario.email || '';
+    document.getElementById('usuarioAdminUsername').value = usuario.username || '';
+    document.getElementById('usuarioAdminRole').value = usuario.role || ROLES.ADMIN;
+    document.getElementById('usuarioAdminTurno').value = usuario.shift || '';
+    document.getElementById('usuarioAdminSenha').value = '';
+    document.getElementById('usuarioAdminAtivo').checked = usuario.is_active !== false;
+    atualizarVisibilidadeTurnoUsuarioAdmin();
+    showSection('usuarios');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function renderListaUsuariosAdmin(usuarios) {
+    const tbody = document.getElementById('listaUsuariosAdmin');
+    if (!tbody) return;
+    if (!usuarios.length) {
+        tbody.innerHTML = '<tr><td colspan="7">Nenhum usuário cadastrado para esta escola.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = usuarios.map(usuario => `
+        <tr>
+            <td>${escapeHtml(usuario.name || '-')}</td>
+            <td>${escapeHtml(usuario.email || '-')}</td>
+            <td>${escapeHtml(usuario.username || '-')}</td>
+            <td>${escapeHtml(textoRoleUsuario(usuario.role))}</td>
+            <td>${escapeHtml(textoTurnoUsuario(usuario.shift))}</td>
+            <td>${escapeHtml(textoStatusUsuarioApp(usuario.is_active !== false))}</td>
+            <td>
+                <div class="inline-group">
+                    <button type="button" class="btn-secondary small" onclick="editarUsuarioAdmin('${escapeHtml(usuario.auth_user_id)}')">Editar</button>
+                    <button type="button" class="btn-danger small" onclick="alternarStatusUsuarioAdmin('${escapeHtml(usuario.auth_user_id)}', ${usuario.is_active === false ? 'true' : 'false'})">
+                        ${usuario.is_active === false ? 'Ativar' : 'Desativar'}
+                    </button>
+                </div>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function carregarUsuariosEscola() {
+    const tbody = document.getElementById('listaUsuariosAdmin');
+    const hint = document.getElementById('usuariosAdminHint');
+    if (!tbody) return;
+    if (!usuarioPodeGerirUsuarios()) {
+        tbody.innerHTML = '<tr><td colspan="7">Entre com um administrador do Supabase para gerenciar usuários.</td></tr>';
+        if (hint) {
+            hint.textContent = 'Somente administradores autenticados no Supabase podem gerenciar usuários desta escola.';
+        }
+        return;
+    }
+    tbody.innerHTML = '<tr><td colspan="7">Carregando usuários...</td></tr>';
+    try {
+        const resposta = await chamarApiUsuarios('/api/users/list');
+        usuariosEscolaCache = Array.isArray(resposta.users) ? resposta.users : [];
+        renderListaUsuariosAdmin(usuariosEscolaCache);
+        if (hint) {
+            hint.textContent = 'Cadastre usuários vinculados a esta escola e defina o perfil de acesso.';
+        }
+    } catch (error) {
+        tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(error.message || 'Erro ao carregar usuários.')}</td></tr>`;
+        mostrarToast(error.message || 'Erro ao carregar usuários.', 'error');
+    }
+}
+
+function editarUsuarioAdmin(authUserId) {
+    const usuario = usuariosEscolaCache.find(item => item.auth_user_id === authUserId);
+    if (!usuario) {
+        mostrarToast('Usuário não encontrado na lista atual.', 'warning');
+        return;
+    }
+    preencherFormularioUsuarioAdmin(usuario);
+}
+
+async function alternarStatusUsuarioAdmin(authUserId, novoStatus) {
+    const usuario = usuariosEscolaCache.find(item => item.auth_user_id === authUserId);
+    if (!usuario) {
+        mostrarToast('Usuário não encontrado na lista atual.', 'warning');
+        return;
+    }
+    try {
+        await chamarApiUsuarios('/api/users/save', {
+            method: 'POST',
+            body: {
+                authUserId,
+                name: usuario.name || '',
+                email: usuario.email || '',
+                username: usuario.username || '',
+                role: usuario.role || ROLES.ADMIN,
+                shift: usuario.shift || null,
+                is_active: novoStatus,
+                password: ''
+            }
+        });
+        mostrarToast(`Usuário ${novoStatus ? 'ativado' : 'desativado'} com sucesso.`);
+        await carregarUsuariosEscola();
+    } catch (error) {
+        mostrarToast(error.message || 'Erro ao atualizar status do usuário.', 'error');
+    }
+}
+
+async function salvarUsuarioAdmin(e) {
+    e.preventDefault();
+    const authUserId = document.getElementById('usuarioAdminAuthId')?.value || '';
+    const name = (document.getElementById('usuarioAdminNome')?.value || '').trim();
+    const email = (document.getElementById('usuarioAdminEmail')?.value || '').trim().toLowerCase();
+    const username = (document.getElementById('usuarioAdminUsername')?.value || '').trim();
+    const role = document.getElementById('usuarioAdminRole')?.value || ROLES.ADMIN;
+    const shift = document.getElementById('usuarioAdminTurno')?.value || '';
+    const password = document.getElementById('usuarioAdminSenha')?.value || '';
+    const isActive = !!document.getElementById('usuarioAdminAtivo')?.checked;
+
+    if (!name || !email) {
+        mostrarToast('Informe nome e e-mail do usuário.', 'warning');
+        return;
+    }
+    if (!authUserId && password.length < 6) {
+        mostrarToast('Defina uma senha com pelo menos 6 caracteres para o novo usuário.', 'warning');
+        return;
+    }
+    if (role === ROLES.COORD_TURNO && !shift) {
+        mostrarToast('Selecione o turno do coordenador.', 'warning');
+        return;
+    }
+    try {
+        const resposta = await chamarApiUsuarios('/api/users/save', {
+            method: 'POST',
+            body: {
+                authUserId: authUserId || null,
+                name,
+                email,
+                username,
+                role,
+                shift: role === ROLES.COORD_TURNO ? shift : null,
+                is_active: isActive,
+                password
+            }
+        });
+        limparFormularioUsuarioAdmin();
+        await carregarUsuariosEscola();
+        mostrarToast(resposta.created ? 'Usuário criado com sucesso.' : 'Usuário atualizado com sucesso.');
+    } catch (error) {
+        mostrarToast(error.message || 'Erro ao salvar usuário.', 'error');
     }
 }
 
@@ -3377,16 +3657,7 @@ function salvarProfessor(e) {
 
     salvarLocal();
     atualizarListaProfessores();
-    const form = document.getElementById('formProfessor');
-    if (form) form.reset();
-    document.getElementById('professorId').value = '';
-    if (apelidoProfInput) {
-        apelidoProfInput.value = '';
-        delete apelidoProfInput.dataset.manual;
-    }
-    const chkCoord = document.getElementById('coordenadorAreaProfessor');
-    if (chkCoord) chkCoord.checked = false;
-    atualizarVisibilidadeCoordProfessor();
+    resetarFormularioProfessorPrincipal();
 }
 
 function editarProfessor(id) {
@@ -4375,7 +4646,7 @@ function montarGradeTurno(turno) {
         const msg = modoVisualGrade === 'CURSO' && cursoVisualGrade
             ? 'Não há turmas deste curso neste turno.'
             : 'Não há turmas cadastradas neste turno.';
-        tabela.innerHTML = `<tr><td class="hint" style="padding:8px;">${msg}</td></tr>`;
+        tabela.innerHTML = `<tr><td class="hint grade-empty-message">${msg}</td></tr>`;
         return;
     }
 
@@ -6378,7 +6649,6 @@ function aplicarModoQrRestrito() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    renderDisponibilidade('dispProfessor', null);
     aplicarModoQrRestrito();
 });
 
@@ -6668,6 +6938,14 @@ function abrirModalTempos() {
     if (!modal) return;
     renderTemposTurnoModal();
     modal.style.display = 'flex';
+    const conteudo = modal.querySelector('.modal-tempos');
+    if (conteudo) {
+        conteudo.scrollTop = 0;
+    }
+    const titulo = modal.querySelector('.modal-tempos-title');
+    if (titulo) {
+        titulo.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    }
 }
 
 function fecharModalTempos() {
@@ -6675,14 +6953,16 @@ function fecharModalTempos() {
     if (modal) modal.style.display = 'none';
 }
 
-document.addEventListener('DOMContentLoaded', async () => {
+function inicializarModalTempos() {
     const modal = document.getElementById('modalTempos');
     if (modal) {
+        if (modal.dataset.outsideCloseReady === 'true') return;
+        modal.dataset.outsideCloseReady = 'true';
         modal.addEventListener('click', (e) => {
             if (e.target === modal) fecharModalTempos();
         });
     }
-});
+}
 
 document.addEventListener('DOMContentLoaded', async () => {
     const cont = document.getElementById('modalDispProfessor');
@@ -8168,7 +8448,7 @@ function gerarTabelaProfessor() {
         
         if (grupoIndex < chavesOrdenadas.length - 1) {
             const trSeparador = document.createElement('tr');
-            trSeparador.innerHTML = '<td colspan="11" style="background:#f5f5f5;height:1px;padding:0;"></td>';
+            trSeparador.innerHTML = '<td colspan="11" class="relatorio-separador-cell"></td>';
             corpo.appendChild(trSeparador);
         }
     });
@@ -9485,10 +9765,10 @@ function gerarConsulta() {
                 <td><strong>${p.nome}</strong></td>
                 <td>${disciplinasUsadas.join(', ') || '-'}</td>
                 <td style="text-align:left;">${cargaPorDisciplinaTexto}</td>
-                <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${aulasProfessor.length}</span></td>
+                <td><span class="consulta-badge consulta-badge--info">${aulasProfessor.length}</span></td>
                 <td>${turnos.map(t => textoTurno(t)).join(', ') || '-'}</td>
-                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${carga.horasMes}</span></td>
-                <td class="col-ch-janelas"><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${temposVagos.vagosMes}</span></td>
+                <td><span class="consulta-badge consulta-badge--success">${carga.horasMes}</span></td>
+                <td class="col-ch-janelas"><span class="consulta-badge consulta-badge--warning">${temposVagos.vagosMes}</span></td>
                 <td>${diasAtuantes}</td>
                 <td>${diasDisponiveis}</td>
                 <td>${turmasAtuantes}</td>
@@ -9941,11 +10221,11 @@ function gerarConsulta() {
                     tr.appendChild(tdDesc);
 
                     const tdProfs = document.createElement('td');
-                    tdProfs.innerHTML = `<span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${profsTurma}</span>`;
+                    tdProfs.innerHTML = `<span class="consulta-badge consulta-badge--warning">${profsTurma}</span>`;
                     tr.appendChild(tdProfs);
 
                     const tdTotal = document.createElement('td');
-                    tdTotal.innerHTML = `<span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${totalAulas}</span>`;
+                    tdTotal.innerHTML = `<span class="consulta-badge consulta-badge--success">${totalAulas}</span>`;
                     tr.appendChild(tdTotal);
 
                     tbody.appendChild(tr);
@@ -9976,9 +10256,9 @@ function gerarConsulta() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${textoTurno(turno)}</strong></td>
-                <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${turmasTurno.length}</span></td>
-                <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${totalAulas}</span></td>
-                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${profsTurno}</span></td>
+                <td><span class="consulta-badge consulta-badge--warning">${turmasTurno.length}</span></td>
+                <td><span class="consulta-badge consulta-badge--info">${totalAulas}</span></td>
+                <td><span class="consulta-badge consulta-badge--success">${profsTurno}</span></td>
                 <td>${cursosTurno.join(', ') || '-'}</td>
             `;
             tbody.appendChild(tr);
@@ -10011,12 +10291,12 @@ function gerarConsulta() {
             const tr = document.createElement('tr');
             tr.innerHTML = `
                 <td><strong>${curso}</strong></td>
-                <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;">${turmasManha}</span></td>
-                <td><span style="background:#fff8e1;padding:2px 8px;border-radius:12px;">${turmasTarde}</span></td>
-                <td><span style="background:#e8f4fc;padding:2px 8px;border-radius:12px;background:#2c3e50;color:white;">${turmasNoite}</span></td>
-                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${turmasCurso.length}</span></td>
-                <td><span style="background:#e8f6e8;padding:2px 8px;border-radius:12px;">${profsCurso}</span></td>
-                <td><span style="background:#d4edda;padding:2px 8px;border-radius:12px;font-weight:bold;">${totalAulas}</span></td>
+                <td><span class="consulta-badge consulta-badge--info">${turmasManha}</span></td>
+                <td><span class="consulta-badge consulta-badge--warning">${turmasTarde}</span></td>
+                <td><span class="consulta-badge consulta-badge--night">${turmasNoite}</span></td>
+                <td><span class="consulta-badge consulta-badge--success">${turmasCurso.length}</span></td>
+                <td><span class="consulta-badge consulta-badge--success">${profsCurso}</span></td>
+                <td><span class="consulta-badge consulta-badge--success">${totalAulas}</span></td>
             `;
             tbody.appendChild(tr);
         });
@@ -10115,7 +10395,7 @@ function importarBackup(event) {
     
     const reader = new FileReader();
     
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
         try {
             const dados = JSON.parse(e.target.result);
             
@@ -10151,7 +10431,21 @@ function importarBackup(event) {
             }
             
             salvarLocal();
-            location.reload();
+            migrarEstruturaLocal();
+            atualizarUIAposCargaTenant();
+            const secaoAtiva = document.querySelector('.section.active')?.id || 'horarios';
+            showSection(secaoAtiva);
+            if (deveSincronizarNuvem()) {
+                const sincronizou = await salvarPersistenciaPostgresAgora();
+                mostrarToast(
+                    sincronizou
+                        ? 'Backup importado e sincronizado com a nuvem.'
+                        : 'Backup importado localmente, mas a sincronização com a nuvem falhou.',
+                    sincronizou ? 'success' : 'warning'
+                );
+            } else {
+                mostrarToast('Backup importado com sucesso!');
+            }
             
         } catch (error) {
             console.error('Erro ao importar dados:', error);
@@ -10334,6 +10628,7 @@ async function inicializarAplicacao() {
 
     const formProfessor = document.getElementById('formProfessor');
     if (formProfessor) formProfessor.addEventListener('submit', salvarProfessor);
+    inicializarFormularioProfessorPrincipal();
     const chkCoordProf = document.getElementById('coordenadorAreaProfessor');
     if (chkCoordProf) {
         chkCoordProf.addEventListener('change', atualizarVisibilidadeCoordProfessor);
@@ -10345,6 +10640,16 @@ async function inicializarAplicacao() {
 
     const formTurma = document.getElementById('formTurma');
     if (formTurma) formTurma.addEventListener('submit', salvarTurma);
+
+    const formUsuarioAdmin = document.getElementById('formUsuarioAdmin');
+    if (formUsuarioAdmin) {
+        formUsuarioAdmin.addEventListener('submit', salvarUsuarioAdmin);
+    }
+    const selectUsuarioRole = document.getElementById('usuarioAdminRole');
+    if (selectUsuarioRole) {
+        selectUsuarioRole.addEventListener('change', atualizarVisibilidadeTurnoUsuarioAdmin);
+        atualizarVisibilidadeTurnoUsuarioAdmin();
+    }
 
     const selCursoTurma = document.getElementById('cursoTurma');
     if (selCursoTurma) {
@@ -10680,6 +10985,7 @@ function salvarModalProfessor(e) {
 }
 
 function inicializarModaisEdicao() {
+    inicializarModalTempos();
     const formModalProf = document.getElementById('formModalProfessor');
     if (formModalProf) {
         formModalProf.addEventListener('submit', salvarModalProfessor);
@@ -10751,7 +11057,10 @@ function renderDisponibilidade(containerId, dados = null, diasLegacy = [], turno
         renderTemposDia(containerId, d, dados, temposMap);
     });
 
-    cont.addEventListener('change', (e) => {
+    if (cont._dispChangeHandler) {
+        cont.removeEventListener('change', cont._dispChangeHandler);
+    }
+    cont._dispChangeHandler = (e) => {
         const target = e.target;
         if (target && target.matches('input[type="checkbox"][data-dia][data-turno][data-tipo="turno"]')) {
             const dia = target.getAttribute('data-dia');
@@ -10759,7 +11068,8 @@ function renderDisponibilidade(containerId, dados = null, diasLegacy = [], turno
             const temposAtuais = coletarTemposDisponibilidade(containerId);
             renderTemposDia(containerId, dia, dispAtual, temposAtuais);
         }
-    });
+    };
+    cont.addEventListener('change', cont._dispChangeHandler);
 }
 
 function coletarDisponibilidade(containerId) {
