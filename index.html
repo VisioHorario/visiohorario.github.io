@@ -21,8 +21,22 @@
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
 
     <link rel="stylesheet" href="style.css">
+    <script>
+        (function () {
+            var params = new URLSearchParams(window.location.search || '');
+            var modoQr = params.get('qr') === '1'
+                || params.get('modo') === 'qr'
+                || params.has('p')
+                || params.has('t')
+                || params.get('alvo') === 'prof'
+                || params.get('alvo') === 'turma';
+            if (modoQr) {
+                document.documentElement.classList.add('qr-boot');
+            }
+        })();
+    </script>
 </head>
-<body>
+<body class="">
 <div class="container">
     <header>
         <div class="header-inner">
@@ -1062,12 +1076,13 @@
                         </button>
                     </div>
                     <div class="form-grid relatorio-qr-body hidden" id="relatorioQrBody">
-                        <p class="hint" style="grid-column:1/-1;">
-                            Após ler o QR Code desta escola, o professor pode escolher o próprio nome na lista
-                            ou o aluno pode selecionar a turma para consultar o horário específico.
-                        </p>
+                        <div class="qr-orientacao full-row">
+                            <h4>Consulta rápida por QR Code</h4>
+                            <p>Use esta área para consultas rápidas sem login. Cada QR Code pode apontar para professores ou para turmas da escola.</p>
+                        </div>
                         <div class="form-group full-row" id="qrProfGroup">
-                            <label for="nomeProfessorConsultaRapida">Relatório rápido por Professor:</label>
+                            <label for="nomeProfessorConsultaRapida">Situação 1: consulta individual do professor</label>
+                            <p class="hint">O professor abre o QR Code, escolhe o próprio nome na lista e gera o PDF do seu horário.</p>
                             <div class="inline-group">
                                 <select id="nomeProfessorConsultaRapida" style="flex:1;">
                                     <option value="">Selecione o professor...</option>
@@ -1075,10 +1090,11 @@
                                 <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoProfessorPDF()">📄 Gerar PDF</button>
                                 <button type="button" class="btn-secondary" onclick="copiarLinkQrProfessor()">🔗 Copiar link</button>
                             </div>
-                            <p class="hint">Escolha o professor na lista e confirme para abrir o horário individual.</p>
+                            <p class="hint">Use o botão `Copiar link` para gerar o QR genérico dos professores desta escola.</p>
                         </div>
                         <div class="form-group full-row" id="qrTurmaGroup">
-                            <label for="turmaConsultaRapida">Relatório rápido por Turma:</label>
+                            <label for="turmaConsultaRapida">Situação 2: consulta do horário da turma</label>
+                            <p class="hint">O aluno ou responsável abre o QR Code, escolhe a turma e gera o PDF do horário específico.</p>
                             <div class="inline-group">
                                 <select id="turmaConsultaRapida" style="flex:1;">
                                     <option value="">Selecione a turma...</option>
@@ -1086,7 +1102,7 @@
                                 <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoTurmaPDF()">📄 Gerar PDF</button>
                                 <button type="button" class="btn-secondary" onclick="copiarLinkQrTurma()">🔗 Copiar link</button>
                             </div>
-                            <p class="hint">Escolha a turma na lista e confirme para abrir o horário específico.</p>
+                            <p class="hint">Use o botão `Copiar link` para gerar o QR genérico das turmas desta escola.</p>
                         </div>
                         <div class="form-group full-row" id="qrOpcoesGroup">
                             <label>Opções do PDF rápido:</label>

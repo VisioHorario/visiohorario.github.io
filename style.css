@@ -40,6 +40,14 @@ body::before {
     z-index: -1;
 }
 
+html.qr-boot #loginCard {
+    display: none !important;
+}
+
+html.qr-boot .main-content {
+    display: flex !important;
+}
+
 .container {
     width: 100%;
     max-width: 100%;
@@ -1094,6 +1102,25 @@ button.small {
     margin-top: 6px;
 }
 
+.qr-orientacao {
+    padding: 14px 16px;
+    border-radius: 14px;
+    background: linear-gradient(180deg, rgba(237, 245, 255, 0.92) 0%, rgba(247, 250, 255, 0.96) 100%);
+    border: 1px solid #d9e5f2;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
+}
+
+.qr-orientacao h4 {
+    margin-bottom: 6px;
+    color: #233c56;
+}
+
+.qr-orientacao p {
+    color: #56708b;
+    font-size: 0.9rem;
+    line-height: 1.5;
+}
+
 .editor-turno-hint {
     margin-bottom: 10px;
     color: #2a4058;
@@ -1636,6 +1663,20 @@ body.theme-dark .dashboard-kpi .kpi-label,
 body.theme-dark .dashboard-lists h4,
 body.theme-dark .theme-toggle-label {
     color: #9fb7d1;
+}
+
+body.theme-dark .qr-orientacao {
+    background: linear-gradient(180deg, rgba(19, 35, 54, 0.95) 0%, rgba(13, 25, 39, 0.96) 100%);
+    border-color: #294564;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+
+body.theme-dark .qr-orientacao h4 {
+    color: #eef6ff;
+}
+
+body.theme-dark .qr-orientacao p {
+    color: #b5c8dd;
 }
 
 body.theme-dark .floating-theme-toggle {

@@ -6941,6 +6941,8 @@ function gerarRelatorioRapidoTurmaPDF() {
 function aplicarModoQrRestrito() {
     if (!QRCODE_MODO_RESTRITO.ativo) return;
 
+    document.documentElement.classList.add('qr-boot');
+
     const loginCard = document.getElementById('loginCard');
     if (loginCard) {
         loginCard.style.display = 'none';
@@ -7094,6 +7096,9 @@ function aplicarSelecaoQrAutomatica() {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+    if (!QRCODE_MODO_RESTRITO.ativo) {
+        document.documentElement.classList.remove('qr-boot');
+    }
     aplicarModoQrRestrito();
 });
 
