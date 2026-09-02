@@ -1063,18 +1063,19 @@
                     </div>
                     <div class="form-grid relatorio-qr-body hidden" id="relatorioQrBody">
                         <p class="hint" style="grid-column:1/-1;">
-                            Após ler o QR Code que aponta para esta página, o professor pode informar o próprio nome
-                            ou o aluno pode escolher a turma, e o sistema baixará automaticamente o PDF do horário.
+                            Após ler o QR Code desta escola, o professor pode escolher o próprio nome na lista
+                            ou o aluno pode selecionar a turma para consultar o horário específico.
                         </p>
                         <div class="form-group full-row" id="qrProfGroup">
                             <label for="nomeProfessorConsultaRapida">Relatório rápido por Professor:</label>
                             <div class="inline-group">
-                                <input type="text" id="nomeProfessorConsultaRapida" list="listaProfessoresRapida" placeholder="Ex.: Maria Silva" style="flex:1;">
+                                <select id="nomeProfessorConsultaRapida" style="flex:1;">
+                                    <option value="">Selecione o professor...</option>
+                                </select>
                                 <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoProfessorPDF()">📄 Gerar PDF</button>
                                 <button type="button" class="btn-secondary" onclick="copiarLinkQrProfessor()">🔗 Copiar link</button>
                             </div>
-                            <datalist id="listaProfessoresRapida"></datalist>
-                            <p class="hint">Use o nome completo ou parte do nome do professor.</p>
+                            <p class="hint">Escolha o professor na lista e confirme para abrir o horário individual.</p>
                         </div>
                         <div class="form-group full-row" id="qrTurmaGroup">
                             <label for="turmaConsultaRapida">Relatório rápido por Turma:</label>
@@ -1085,7 +1086,7 @@
                                 <button type="button" class="btn-pdf" onclick="gerarRelatorioRapidoTurmaPDF()">📄 Gerar PDF</button>
                                 <button type="button" class="btn-secondary" onclick="copiarLinkQrTurma()">🔗 Copiar link</button>
                             </div>
-                            <p class="hint">O PDF destacará somente a turma escolhida, com cores dos professores.</p>
+                            <p class="hint">Escolha a turma na lista e confirme para abrir o horário específico.</p>
                         </div>
                         <div class="form-group full-row" id="qrOpcoesGroup">
                             <label>Opções do PDF rápido:</label>

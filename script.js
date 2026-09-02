@@ -178,7 +178,16 @@ const QRCODE_MODO_RESTRITO = (() => {
         || hasProfShort
         || hasTurmaShort;
     const alvo = PARAMS_INICIAIS.get('alvo') || (hasProfShort ? 'prof' : hasTurmaShort ? 'turma' : '');
-    return { ativo, alvo };
+    const tenantCodigo = normalizarCodigoEscola(
+        PARAMS_INICIAIS.get('tenant')
+        || PARAMS_INICIAIS.get('escola')
+        || ''
+    );
+    const profId = String(PARAMS_INICIAIS.get('profId') || '').trim();
+    const profNome = String(PARAMS_INICIAIS.get('profNome') || '').trim();
+    const turmaId = String(PARAMS_INICIAIS.get('turmaId') || '').trim();
+    const autoPdf = PARAMS_INICIAIS.get('auto') !== '0';
+    return { ativo, alvo, tenantCodigo, profId, profNome, turmaId, autoPdf };
 })();
 
 
@@ -191,6 +200,7 @@ let clipboardAulas = [];
 let clipboardModo = null;
 let menuContextoGrade = null;
 let menuContextoTimeout = null;
+let qrAutoPdfExecutado = false;
 
 function limparSelecaoGrade() {
     gradeCelulasSelecionadas.forEach(td => {
@@ -3678,7 +3688,7 @@ function atualizarListaProfessores() {
     const selProfRel = document.getElementById('professorRelatorio');
     const selProfModal = document.getElementById('modalProfessor');
     const selProfRapido = document.getElementById('rapidoProfessor');
-    const listaProfRapida = document.getElementById('listaProfessoresRapida');
+    const selProfQr = document.getElementById('nomeProfessorConsultaRapida');
 
     if (!corpo) return;
     corpo.innerHTML = '';
@@ -3686,7 +3696,7 @@ function atualizarListaProfessores() {
     if (selProfRel) selProfRel.innerHTML = '<option value="">Selecione...</option>';
     if (selProfModal) selProfModal.innerHTML = '<option value="">Selecione...</option>';
     if (selProfRapido) selProfRapido.innerHTML = '<option value="">Selecione...</option>';
-    if (listaProfRapida) listaProfRapida.innerHTML = '';
+    if (selProfQr) selProfQr.innerHTML = '<option value="">Selecione o professor...</option>';
 
     const ordenados = [...professores].sort((a, b) => {
         const pesoBase = (x) => x.baseTipo === 'COMUM' ? 2 : 1;
@@ -3753,10 +3763,11 @@ function atualizarListaProfessores() {
             selProfRapido.appendChild(opt4);
         }
 
-        if (listaProfRapida) {
-            const optList = document.createElement('option');
-            optList.value = p.nome;
-            listaProfRapida.appendChild(optList);
+        if (selProfQr) {
+            const optQr = document.createElement('option');
+            optQr.value = p.id;
+            optQr.textContent = p.nome;
+            selProfQr.appendChild(optQr);
         }
         const trEdit = document.createElement('tr');
         trEdit.className = 'prof-edit-row';
@@ -6441,6 +6452,19 @@ function encontrarProfessorPorNome(nome) {
     return professores.find(p => normalizarTextoSimples(p.nome).includes(alvo)) || null;
 }
 
+function obterProfessorConsultaRapidaSelecionado() {
+    const campo = document.getElementById('nomeProfessorConsultaRapida');
+    if (!campo) return null;
+
+    const valor = String(campo.value || '').trim();
+    if (!valor) return null;
+
+    const porId = professores.find(p => String(p.id) === valor);
+    if (porId) return porId;
+
+    return encontrarProfessorPorNome(valor);
+}
+
 function montarLinhasConsultaRapida(aulasFiltradas, titulo) {
     const tbody = document.getElementById('tabelaConsultaRapidaBody');
     const resumo = document.getElementById('consultaRapidaResumo');
@@ -6597,12 +6621,9 @@ function montarLinhasConsultaRapida(aulasFiltradas, titulo) {
 }
 
 function consultarHorarioProfessorRapido() {
-    const input = document.getElementById('nomeProfessorConsultaRapida');
-    if (!input) return;
-    const nome = input.value;
-    const prof = encontrarProfessorPorNome(nome);
+    const prof = obterProfessorConsultaRapidaSelecionado();
     if (!prof) {
-        mostrarToast('Professor não encontrado. Verifique o nome digitado.', 'warning');
+        mostrarToast('Selecione um professor para consultar o horário.', 'warning');
         return;
     }
 
@@ -6627,12 +6648,9 @@ function consultarHorarioTurmaRapido() {
 
 function gerarRelatorioRapidoProfessorPDF() {
     const { jsPDF } = window.jspdf;
-    const input = document.getElementById('nomeProfessorConsultaRapida');
-    if (!input) return;
-    const nome = input.value;
-    const prof = encontrarProfessorPorNome(nome);
+    const prof = obterProfessorConsultaRapidaSelecionado();
     if (!prof) {
-        mostrarToast('Professor não encontrado. Verifique o nome digitado.', 'warning');
+        mostrarToast('Selecione um professor para gerar o PDF.', 'warning');
         return;
     }
 
@@ -6980,17 +6998,116 @@ function aplicarModoQrRestrito() {
     });
 }
 
+function obterBaseUrlQr() {
+    return window.location.origin + window.location.pathname;
+}
+
+function obterCodigoTenantAtual() {
+    return normalizarCodigoEscola(
+        (tenantAtual && (tenantAtual.codigo || tenantAtual.code))
+        || QRCODE_MODO_RESTRITO.tenantCodigo
+        || ''
+    );
+}
+
+function construirUrlQr(alvo, extras = {}) {
+    const params = new URLSearchParams();
+    params.set('qr', '1');
+    params.set('alvo', alvo);
+    const tenantCodigo = obterCodigoTenantAtual();
+    if (tenantCodigo) {
+        params.set('tenant', tenantCodigo);
+    }
+    Object.entries(extras).forEach(([chave, valor]) => {
+        if (valor !== undefined && valor !== null && String(valor).trim() !== '') {
+            params.set(chave, String(valor));
+        }
+    });
+    return `${obterBaseUrlQr()}?${params.toString()}`;
+}
+
+async function carregarDadosPublicosQr() {
+    if (!QRCODE_MODO_RESTRITO.ativo || !QRCODE_MODO_RESTRITO.tenantCodigo) {
+        return false;
+    }
+    try {
+        const resposta = await fetch(`/api/qr/snapshot?tenant=${encodeURIComponent(QRCODE_MODO_RESTRITO.tenantCodigo)}`, {
+            cache: 'no-store'
+        });
+        const dados = await resposta.json().catch(() => null);
+        if (!resposta.ok || !dados || !dados.payload) {
+            throw new Error(dados?.error || 'Não foi possível carregar os dados públicos do QR Code.');
+        }
+        const aplicou = aplicarSnapshotPersistencia(dados.payload);
+        if (!aplicou) {
+            throw new Error('Os dados públicos do QR Code vieram em formato inválido.');
+        }
+        tenantAtual = {
+            id: dados.tenant?.id || null,
+            codigo: normalizarCodigoEscola(dados.tenant?.code || QRCODE_MODO_RESTRITO.tenantCodigo),
+            nome: dados.tenant?.name || 'Escola',
+            code: normalizarCodigoEscola(dados.tenant?.code || QRCODE_MODO_RESTRITO.tenantCodigo),
+            name: dados.tenant?.name || 'Escola'
+        };
+        migrarEstruturaLocal();
+        return true;
+    } catch (error) {
+        console.error('Erro ao carregar dados públicos do QR:', error);
+        mostrarToast(error.message || 'Falha ao carregar os dados do QR Code.', 'error');
+        return false;
+    }
+}
+
+function aplicarSelecaoQrAutomatica() {
+    if (!QRCODE_MODO_RESTRITO.ativo) return;
+
+    if (QRCODE_MODO_RESTRITO.alvo === 'prof') {
+        const input = document.getElementById('nomeProfessorConsultaRapida');
+        if (!input) return;
+        let prof = null;
+        if (QRCODE_MODO_RESTRITO.profId) {
+            prof = professores.find(p => String(p.id) === QRCODE_MODO_RESTRITO.profId) || null;
+        }
+        if (!prof && QRCODE_MODO_RESTRITO.profNome) {
+            prof = encontrarProfessorPorNome(QRCODE_MODO_RESTRITO.profNome);
+        }
+        if (!prof) return;
+        input.value = prof.nome || '';
+        if (QRCODE_MODO_RESTRITO.autoPdf && !qrAutoPdfExecutado) {
+            qrAutoPdfExecutado = true;
+            setTimeout(() => gerarRelatorioRapidoProfessorPDF(), 250);
+        }
+        return;
+    }
+
+    if (QRCODE_MODO_RESTRITO.alvo === 'turma') {
+        const sel = document.getElementById('turmaConsultaRapida');
+        if (!sel || !QRCODE_MODO_RESTRITO.turmaId) return;
+        const turma = turmas.find(t => String(t.id) === QRCODE_MODO_RESTRITO.turmaId);
+        if (!turma) return;
+        sel.value = String(turma.id);
+        if (QRCODE_MODO_RESTRITO.autoPdf && !qrAutoPdfExecutado) {
+            qrAutoPdfExecutado = true;
+            setTimeout(() => gerarRelatorioRapidoTurmaPDF(), 250);
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', async () => {
     aplicarModoQrRestrito();
 });
 
 function copiarLinkQrProfessor() {
-    const base = window.location.origin + window.location.pathname;
-    const url = `${base}?p=1`;
+    const tenantCodigo = obterCodigoTenantAtual();
+    if (!tenantCodigo) {
+        mostrarToast('Não foi possível identificar a escola para gerar o link do QR.', 'warning');
+        return;
+    }
+    const url = construirUrlQr('prof');
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => {
-                mostrarToast('Link de consulta rápida do professor copiado!', 'success');
+                mostrarToast('Link genérico do QR para professores copiado!', 'success');
             }).catch(() => {
                 window.prompt('Copie o link abaixo:', url);
             });
@@ -7003,12 +7120,16 @@ function copiarLinkQrProfessor() {
 }
 
 function copiarLinkQrTurma() {
-    const base = window.location.origin + window.location.pathname;
-    const url = `${base}?t=1`;
+    const tenantCodigo = obterCodigoTenantAtual();
+    if (!tenantCodigo) {
+        mostrarToast('Não foi possível identificar a escola para gerar o link do QR.', 'warning');
+        return;
+    }
+    const url = construirUrlQr('turma');
     try {
         if (navigator.clipboard && navigator.clipboard.writeText) {
             navigator.clipboard.writeText(url).then(() => {
-                mostrarToast('Link de consulta rápida da turma copiado!', 'success');
+                mostrarToast('Link genérico do QR para turmas copiado!', 'success');
             }).catch(() => {
                 window.prompt('Copie o link abaixo:', url);
             });
@@ -10962,6 +11083,10 @@ async function inicializarAplicacao() {
         }
     }
 
+    if (QRCODE_MODO_RESTRITO.ativo) {
+        await carregarDadosPublicosQr();
+    }
+
     const formProfessor = document.getElementById('formProfessor');
     if (formProfessor) formProfessor.addEventListener('submit', salvarProfessor);
     inicializarFormularioProfessorPrincipal();
@@ -11047,6 +11172,7 @@ async function inicializarAplicacao() {
     preencherSelectCursoVisual();
     atualizarListaProfessores();
     atualizarListaTurmas();
+    aplicarSelecaoQrAutomatica();
     preencherSelectDisciplinasApelido();
     atualizarChipsTempos();
     montarGradeTurno(turnoAtualGrade);
