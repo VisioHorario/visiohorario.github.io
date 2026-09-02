@@ -295,6 +295,7 @@ header {
 }
 
 .login-card input[type="text"],
+.login-card input[type="email"],
 .login-card input[type="password"] {
     background: #f6f9ff;
 }
@@ -443,6 +444,7 @@ header {
 }
 
 .form-group input[type="text"],
+.form-group input[type="email"],
 .form-group input[type="password"],
 .form-group input[type="time"],
 .form-group select {
@@ -457,12 +459,14 @@ header {
 }
 
 .form-group input[type="text"]::placeholder,
+.form-group input[type="email"]::placeholder,
 .form-group input[type="password"]::placeholder,
 .form-group input[type="time"]::placeholder {
     color: #6e7f91;
 }
 
 .form-group input[type="text"]:focus,
+.form-group input[type="email"]:focus,
 .form-group input[type="password"]:focus,
 .form-group input[type="time"]:focus,
 .form-group select:focus {
@@ -1653,9 +1657,12 @@ body.theme-dark .floating-theme-toggle .theme-toggle-icon {
 
 @media (max-width: 640px) {
     .floating-theme-toggle {
-        top: 56px;
-        right: 12px;
-        padding: 4px 7px;
+        top: 6px;
+        bottom: auto;
+        right: 6px;
+        padding: 2px 5px;
+        transform: translateZ(0) scale(0.78);
+        transform-origin: top right;
     }
 
     .login-card .inline-group {
@@ -1970,6 +1977,14 @@ body.theme-dark .relatorio-separador-cell {
     .header-inner {
         flex-direction: column;
         align-items: flex-start;
+    }
+
+    .floating-theme-toggle {
+        top: 8px;
+        bottom: auto;
+        right: 8px;
+        transform: translateZ(0) scale(0.82);
+        transform-origin: top right;
     }
 
     .header-icons {

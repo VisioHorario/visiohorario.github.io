@@ -87,8 +87,10 @@ let turmas = [];
 let aulas = [];
 
 const CURSO_TEMPO_INTEGRAL = 'Tempo Integral';
+const TENANT_CODE_GLOBAL = 'GLOBAL';
 
 const ROLES = {
+    SUPER_ADMIN: 'SUPER_ADMIN',
     ADMIN: 'ADMIN',
     COORD_TURNO: 'COORD_TURNO'
 };
@@ -96,11 +98,20 @@ const ROLES = {
 const TURNOS_USUARIO = ['MANHA', 'TARDE', 'NOITE'];
 
 const TENANTS_FIXOS = [
+    { id: 'global', codigo: TENANT_CODE_GLOBAL, nome: 'Administracao Global' },
     { id: 'esc001', codigo: 'ESC001', nome: 'Escola 001' },
     { id: 'esc002', codigo: 'ESC002', nome: 'Escola 002' }
 ];
 
 const USUARIOS_FIXOS = [
+    {
+        id: 'global_super_admin',
+        nome: 'Superadministrador',
+        login: 'superadmin',
+        senha: 'superadmin',
+        role: ROLES.SUPER_ADMIN,
+        tenantId: 'global'
+    },
     {
         id: 'esc001_admin_basico',
         nome: 'Administrador',
@@ -138,6 +149,8 @@ const USUARIOS_FIXOS = [
 let usuarioLogado = null;
 let tenantAtual = null;
 let usuariosEscolaCache = [];
+let tenantsAdminCache = [];
+let tenantAdminSelecionadoId = '';
 
 let turnoAtualGrade = 'MANHA';
 let modoVisualGrade = 'TURNO';
@@ -1825,6 +1838,10 @@ function mapearAuthSupabaseParaUsuarioApp(authUser, appUser) {
     };
 }
 
+function isSuperAdminUser(user = usuarioLogado) {
+    return !!(user && user.role === ROLES.SUPER_ADMIN);
+}
+
 async function autenticarUsuarioSupabase(codigoEscola, login, senha) {
     try {
         if (!SUPABASE_ATIVO || !supabaseClient) return null;
@@ -1926,7 +1943,7 @@ async function restaurarSessaoSupabase() {
 
 function usuarioTemAcessoCompleto() {
     if (usuarioLogado && usuarioLogado.origem === 'SUPABASE') {
-        return usuarioLogado.role === ROLES.ADMIN;
+        return [ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(usuarioLogado.role);
     }
     return !!(usuarioLogado && /admin_completo$/i.test(usuarioLogado.id));
 }
@@ -1934,14 +1951,23 @@ function usuarioTemAcessoCompleto() {
 function usuarioPodeGerirUsuarios() {
     return Boolean(
         usuarioLogado
-        && usuarioLogado.role === ROLES.ADMIN
+        && [ROLES.SUPER_ADMIN, ROLES.ADMIN].includes(usuarioLogado.role)
         && tenantAtual
         && tenantAtual.id
         && (usuarioLogado.origem === 'SUPABASE' || usuarioLogado.origem === 'LOCAL')
     );
 }
 
+function usuarioPodeGerirEscolas() {
+    return Boolean(
+        usuarioLogado
+        && usuarioLogado.role === ROLES.SUPER_ADMIN
+        && (usuarioLogado.origem === 'SUPABASE' || usuarioLogado.origem === 'LOCAL')
+    );
+}
+
 function textoRoleUsuario(role) {
+    if (role === ROLES.SUPER_ADMIN) return 'Superadministrador';
     if (role === ROLES.COORD_TURNO) return 'Coordenador de turno';
     return 'Administrador';
 }
@@ -1964,26 +1990,14 @@ function escapeHtml(valor) {
 }
 
 function aplicarPermissoesNaUI() {
-    const menuBtns = Array.from(document.querySelectorAll('.menu-btn'));
+    const btnEscolas = document.getElementById('btnMenuEscolas');
     const btnUsuarios = document.getElementById('btnMenuUsuarios');
-    const btnRelatorios = menuBtns.find(b => b.textContent.includes('Relatórios'));
-    const btnConsultas = menuBtns.find(b => b.textContent.includes('Consultas'));
-    if (!usuarioLogado) {
-        if (btnUsuarios) btnUsuarios.style.display = 'none';
-        if (btnRelatorios) btnRelatorios.style.display = 'none';
-        if (btnConsultas) btnConsultas.style.display = 'none';
-        const blocoTempoVago = document.getElementById('profRelatorioMostrarVagos')?.closest('.form-group');
-        const blocoGraficos = document.getElementById('profRelatorioMostrarGraficos')?.closest('.form-group');
-        const charts = document.querySelector('.prof-charts');
-        if (blocoTempoVago) blocoTempoVago.style.display = 'none';
-        if (blocoGraficos) blocoGraficos.style.display = 'none';
-        if (charts) charts.style.display = 'none';
-        return;
-    }
-    if (btnUsuarios) {
-        btnUsuarios.style.display = usuarioPodeGerirUsuarios() ? '' : 'none';
-    }
-    if (btnRelatorios) btnRelatorios.style.display = '';
+    const btnProfessores = document.getElementById('btnMenuProfessores');
+    const btnTurmas = document.getElementById('btnMenuTurmas');
+    const btnHorarios = document.getElementById('btnMenuHorarios');
+    const btnRelatorios = document.getElementById('btnMenuRelatorios');
+    const btnConsultas = document.getElementById('btnMenuConsultas');
+    const usuariosTenantCard = document.getElementById('usuariosTenantCard');
     const blocoTempoVago = document.getElementById('profRelatorioMostrarVagos')?.closest('.form-group');
     const blocoGraficos = document.getElementById('profRelatorioMostrarGraficos')?.closest('.form-group');
     const charts = document.querySelector('.prof-charts');
@@ -1992,6 +2006,51 @@ function aplicarPermissoesNaUI() {
     const blocoUsarIa = document.getElementById('filtro-usar-ia');
     const chkUsarIa = document.getElementById('chkUsarIaNoAjuste');
     const btnRestaurarNuvem = document.getElementById('btnRestaurarNuvem');
+
+    if (!usuarioLogado) {
+        if (btnEscolas) btnEscolas.style.display = 'none';
+        if (btnUsuarios) btnUsuarios.style.display = 'none';
+        if (btnProfessores) btnProfessores.style.display = 'none';
+        if (btnTurmas) btnTurmas.style.display = 'none';
+        if (btnHorarios) btnHorarios.style.display = 'none';
+        if (btnRelatorios) btnRelatorios.style.display = 'none';
+        if (btnConsultas) btnConsultas.style.display = 'none';
+        if (blocoTempoVago) blocoTempoVago.style.display = 'none';
+        if (blocoGraficos) blocoGraficos.style.display = 'none';
+        if (charts) charts.style.display = 'none';
+        if (usuariosTenantCard) usuariosTenantCard.style.display = 'none';
+        return;
+    }
+
+    if (btnEscolas) {
+        btnEscolas.style.display = usuarioPodeGerirEscolas() ? '' : 'none';
+    }
+    if (btnUsuarios) {
+        btnUsuarios.style.display = usuarioPodeGerirUsuarios() ? '' : 'none';
+    }
+    if (usuariosTenantCard) {
+        usuariosTenantCard.style.display = usuarioPodeGerirEscolas() ? '' : 'none';
+    }
+
+    if (isSuperAdminUser()) {
+        if (btnProfessores) btnProfessores.style.display = 'none';
+        if (btnTurmas) btnTurmas.style.display = 'none';
+        if (btnHorarios) btnHorarios.style.display = 'none';
+        if (btnRelatorios) btnRelatorios.style.display = 'none';
+        if (btnConsultas) btnConsultas.style.display = 'none';
+        if (blocoTempoVago) blocoTempoVago.style.display = 'none';
+        if (blocoGraficos) blocoGraficos.style.display = 'none';
+        if (charts) charts.style.display = 'none';
+        if (blocoUsarIa) blocoUsarIa.style.display = 'none';
+        if (chkUsarIa) chkUsarIa.checked = false;
+        if (btnRestaurarNuvem) btnRestaurarNuvem.style.display = 'none';
+        return;
+    }
+
+    if (btnProfessores) btnProfessores.style.display = '';
+    if (btnTurmas) btnTurmas.style.display = '';
+    if (btnHorarios) btnHorarios.style.display = '';
+    if (btnRelatorios) btnRelatorios.style.display = '';
     const acessoCompleto = usuarioTemAcessoCompleto();
     if (blocoUsarIa) {
         blocoUsarIa.style.display = acessoCompleto ? '' : 'none';
@@ -2161,7 +2220,7 @@ function atualizarUIAposCargaTenant() {
 }
 
 function carregarDadosTenantAtual() {
-    if (!tenantAtual || !tenantAtual.id) {
+    if (!tenantAtual || !tenantAtual.id || isSuperAdminUser()) {
         resetarDadosEmMemoria();
         atualizarUIAposCargaTenant();
         return;
@@ -2175,8 +2234,12 @@ function showSection(id) {
     if (QRCODE_MODO_RESTRITO.ativo && id !== 'relatorios') {
         return;
     }
+    if (id === 'escolas' && !usuarioPodeGerirEscolas()) {
+        mostrarToast('Somente o superadministrador pode acessar a configuração global.', 'warning');
+        return;
+    }
     if (id === 'usuarios' && !usuarioPodeGerirUsuarios()) {
-        mostrarToast('Somente administradores autenticados no Supabase podem gerenciar usuários.', 'warning');
+        mostrarToast('Somente administradores podem gerenciar usuários.', 'warning');
         return;
     }
     document.querySelectorAll('.section').forEach(sec => sec.classList.remove('active'));
@@ -2198,6 +2261,9 @@ function showSection(id) {
     }
     if (id === 'dashboard') {
         renderDashboardRapido();
+    }
+    if (id === 'escolas') {
+        carregarTenantsAdmin();
     }
     if (id === 'usuarios') {
         carregarUsuariosEscola();
@@ -2245,7 +2311,7 @@ async function obterTokenAcessoSupabaseAtual() {
     return data.session.access_token || null;
 }
 
-async function chamarApiUsuarios(caminho, options = {}) {
+async function chamarApiAdmin(caminho, options = {}) {
     const token = await obterTokenAcessoSupabaseAtual();
     if (!token) {
         throw new Error('Sua sessão do Supabase expirou. Entre novamente para continuar.');
@@ -2270,9 +2336,191 @@ async function chamarApiUsuarios(caminho, options = {}) {
         dados = { error: texto || 'Resposta inválida do servidor.' };
     }
     if (!resposta.ok) {
-        throw new Error(dados.error || 'Não foi possível concluir a operação com usuários.');
+        throw new Error(dados.error || 'Não foi possível concluir a operação.');
     }
     return dados;
+}
+
+async function chamarApiUsuarios(caminho, options = {}) {
+    return chamarApiAdmin(caminho, options);
+}
+
+async function chamarApiTenants(caminho, options = {}) {
+    return chamarApiAdmin(caminho, options);
+}
+
+function formatarDataHoraCurta(valor) {
+    if (!valor) return '-';
+    const data = new Date(valor);
+    if (Number.isNaN(data.getTime())) return '-';
+    return data.toLocaleDateString('pt-BR');
+}
+
+function listarUsuariosFixosPorTenant(tenantId) {
+    return USUARIOS_FIXOS
+        .filter(usuario => usuario.tenantId === tenantId && usuario.role !== ROLES.SUPER_ADMIN)
+        .map(usuario => ({
+            id: usuario.id,
+            tenant_id: usuario.tenantId,
+            auth_user_id: usuario.id,
+            name: usuario.nome,
+            email: '',
+            username: usuario.login,
+            role: usuario.role,
+            shift: null,
+            is_active: true
+        }));
+}
+
+function preencherSelectTenantUsuariosAdmin() {
+    const select = document.getElementById('usuarioAdminTenantSelect');
+    if (!select) return;
+    const anterior = tenantAdminSelecionadoId || select.value || '';
+    const options = ['<option value="">Selecione a escola...</option>']
+        .concat(tenantsAdminCache.map(tenant => (
+            `<option value="${escapeHtml(tenant.id)}">${escapeHtml(`${tenant.code} - ${tenant.name}`)}</option>`
+        )));
+    select.innerHTML = options.join('');
+    if (anterior && tenantsAdminCache.some(tenant => tenant.id === anterior)) {
+        select.value = anterior;
+    } else if (tenantsAdminCache.length === 1) {
+        select.value = tenantsAdminCache[0].id;
+    }
+    tenantAdminSelecionadoId = select.value || '';
+}
+
+function obterTenantGerenciadoUsuarios() {
+    if (usuarioPodeGerirEscolas()) {
+        const select = document.getElementById('usuarioAdminTenantSelect');
+        const tenantId = String(select?.value || tenantAdminSelecionadoId || '').trim();
+        if (!tenantId) return null;
+        return tenantsAdminCache.find(tenant => tenant.id === tenantId) || null;
+    }
+    return tenantAtual;
+}
+
+function renderListaTenantsAdmin(tenants) {
+    const tbody = document.getElementById('listaTenantsAdmin');
+    if (!tbody) return;
+    if (!tenants.length) {
+        tbody.innerHTML = '<tr><td colspan="4">Nenhuma escola cadastrada ainda.</td></tr>';
+        return;
+    }
+    tbody.innerHTML = tenants.map(tenant => `
+        <tr>
+            <td><strong>${escapeHtml(tenant.code || '-')}</strong></td>
+            <td>${escapeHtml(tenant.name || '-')}</td>
+            <td>${escapeHtml(formatarDataHoraCurta(tenant.created_at))}</td>
+            <td>
+                <button type="button" class="btn-secondary small" onclick="selecionarTenantParaUsuariosAdmin('${escapeHtml(tenant.id)}')">
+                    Gerenciar usuários
+                </button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function carregarTenantsAdmin(exibirToastErro = false) {
+    const tbody = document.getElementById('listaTenantsAdmin');
+    if (!usuarioPodeGerirEscolas()) {
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="4">Acesso restrito ao superadministrador.</td></tr>';
+        }
+        return [];
+    }
+    if (usuarioLogado?.origem === 'LOCAL') {
+        tenantsAdminCache = TENANTS_FIXOS
+            .filter(tenant => tenant.codigo !== TENANT_CODE_GLOBAL)
+            .map(tenant => ({
+                id: tenant.id,
+                code: tenant.codigo,
+                name: tenant.nome,
+                created_at: null
+            }));
+        renderListaTenantsAdmin(tenantsAdminCache);
+        preencherSelectTenantUsuariosAdmin();
+        return tenantsAdminCache;
+    }
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="4">Carregando escolas...</td></tr>';
+    }
+    try {
+        const resposta = await chamarApiTenants('/api/tenants/list');
+        tenantsAdminCache = Array.isArray(resposta.tenants) ? resposta.tenants : [];
+        renderListaTenantsAdmin(tenantsAdminCache);
+        preencherSelectTenantUsuariosAdmin();
+        return tenantsAdminCache;
+    } catch (error) {
+        if (tbody) {
+            tbody.innerHTML = `<tr><td colspan="4">${escapeHtml(error.message || 'Erro ao carregar escolas.')}</td></tr>`;
+        }
+        if (exibirToastErro) {
+            mostrarToast(error.message || 'Erro ao carregar escolas.', 'error');
+        }
+        return [];
+    }
+}
+
+async function selecionarTenantParaUsuariosAdmin(tenantId) {
+    tenantAdminSelecionadoId = tenantId || '';
+    preencherSelectTenantUsuariosAdmin();
+    showSection('usuarios');
+    await carregarUsuariosEscola();
+}
+
+function limparFormularioTenantAdmin() {
+    const form = document.getElementById('formTenantAdmin');
+    if (form) form.reset();
+}
+
+async function salvarTenantAdmin(e) {
+    e.preventDefault();
+    if (usuarioLogado?.origem === 'LOCAL') {
+        mostrarToast('No modo local esta tela serve para pré-visualização. O cadastro real de escolas funciona na versão online com Supabase.', 'warning');
+        return;
+    }
+    const code = (document.getElementById('tenantAdminCode')?.value || '').trim().toUpperCase();
+    const name = (document.getElementById('tenantAdminName')?.value || '').trim();
+    const adminName = (document.getElementById('tenantAdminUserName')?.value || '').trim();
+    const adminEmail = (document.getElementById('tenantAdminUserEmail')?.value || '').trim().toLowerCase();
+    const adminUsername = (document.getElementById('tenantAdminUserLogin')?.value || '').trim();
+    const adminPassword = document.getElementById('tenantAdminUserPassword')?.value || '';
+
+    if (!code || !name) {
+        mostrarToast('Informe o código e o nome da escola.', 'warning');
+        return;
+    }
+    if (!adminName || !adminEmail) {
+        mostrarToast('Informe nome e e-mail do administrador inicial.', 'warning');
+        return;
+    }
+    if (adminPassword.length < 6) {
+        mostrarToast('Defina uma senha com pelo menos 6 caracteres para o administrador inicial.', 'warning');
+        return;
+    }
+
+    try {
+        const resposta = await chamarApiTenants('/api/tenants/save', {
+            method: 'POST',
+            body: {
+                code,
+                name,
+                adminName,
+                adminEmail,
+                adminUsername,
+                adminPassword
+            }
+        });
+        limparFormularioTenantAdmin();
+        await carregarTenantsAdmin();
+        if (resposta.tenant?.id) {
+            tenantAdminSelecionadoId = resposta.tenant.id;
+            preencherSelectTenantUsuariosAdmin();
+        }
+        mostrarToast('Escola e administrador inicial criados com sucesso.');
+    } catch (error) {
+        mostrarToast(error.message || 'Erro ao criar escola.', 'error');
+    }
 }
 
 function atualizarVisibilidadeTurnoUsuarioAdmin() {
@@ -2321,7 +2569,7 @@ function renderListaUsuariosAdmin(usuarios) {
     const tbody = document.getElementById('listaUsuariosAdmin');
     if (!tbody) return;
     if (!usuarios.length) {
-        tbody.innerHTML = '<tr><td colspan="7">Nenhum usuário cadastrado para esta escola.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">Nenhum usuário cadastrado para a escola selecionada.</td></tr>';
         return;
     }
     tbody.innerHTML = usuarios.map(usuario => `
@@ -2347,21 +2595,55 @@ function renderListaUsuariosAdmin(usuarios) {
 async function carregarUsuariosEscola() {
     const tbody = document.getElementById('listaUsuariosAdmin');
     const hint = document.getElementById('usuariosAdminHint');
+    const hintTenant = document.getElementById('usuariosTenantHint');
     if (!tbody) return;
     if (!usuarioPodeGerirUsuarios()) {
-        tbody.innerHTML = '<tr><td colspan="7">Entre com um administrador do Supabase para gerenciar usuários.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7">Entre com um administrador para gerenciar usuários.</td></tr>';
         if (hint) {
-            hint.textContent = 'Somente administradores autenticados no Supabase podem gerenciar usuários desta escola.';
+            hint.textContent = 'Somente administradores podem gerenciar usuários.';
+        }
+        return;
+    }
+    if (usuarioPodeGerirEscolas() && !tenantsAdminCache.length) {
+        await carregarTenantsAdmin();
+    }
+    const tenantGerenciado = obterTenantGerenciadoUsuarios();
+    if (!tenantGerenciado) {
+        usuariosEscolaCache = [];
+        tbody.innerHTML = '<tr><td colspan="7">Selecione uma escola para gerenciar os usuários.</td></tr>';
+        if (hint) {
+            hint.textContent = 'Escolha a escola no seletor acima para cadastrar ou editar usuários.';
+        }
+        if (hintTenant) {
+            hintTenant.textContent = 'Selecione uma escola para carregar os usuários e usar o formulário abaixo.';
+        }
+        return;
+    }
+    if (hintTenant) {
+        hintTenant.textContent = usuarioPodeGerirEscolas()
+            ? `Usuários sendo gerenciados para ${tenantGerenciado.code} - ${tenantGerenciado.name}.`
+            : `Usuários vinculados a ${tenantGerenciado.codigo || tenantGerenciado.code} - ${tenantGerenciado.nome || tenantGerenciado.name}.`;
+    }
+    if (usuarioLogado?.origem === 'LOCAL') {
+        usuariosEscolaCache = listarUsuariosFixosPorTenant(tenantGerenciado.id);
+        renderListaUsuariosAdmin(usuariosEscolaCache);
+        if (hint) {
+            hint.textContent = 'Pré-visualização local: a gestão real de usuários funciona pela versão online conectada ao Supabase.';
         }
         return;
     }
     tbody.innerHTML = '<tr><td colspan="7">Carregando usuários...</td></tr>';
     try {
-        const resposta = await chamarApiUsuarios('/api/users/list');
+        const caminho = usuarioPodeGerirEscolas()
+            ? `/api/users/list?tenantId=${encodeURIComponent(tenantGerenciado.id)}`
+            : '/api/users/list';
+        const resposta = await chamarApiUsuarios(caminho);
         usuariosEscolaCache = Array.isArray(resposta.users) ? resposta.users : [];
         renderListaUsuariosAdmin(usuariosEscolaCache);
         if (hint) {
-            hint.textContent = 'Cadastre usuários vinculados a esta escola e defina o perfil de acesso.';
+            hint.textContent = usuarioPodeGerirEscolas()
+                ? `Cadastre usuários vinculados a ${tenantGerenciado.name} e defina o perfil de acesso.`
+                : 'Cadastre usuários vinculados a esta escola e defina o perfil de acesso.';
         }
     } catch (error) {
         tbody.innerHTML = `<tr><td colspan="7">${escapeHtml(error.message || 'Erro ao carregar usuários.')}</td></tr>`;
@@ -2380,6 +2662,11 @@ function editarUsuarioAdmin(authUserId) {
 
 async function alternarStatusUsuarioAdmin(authUserId, novoStatus) {
     const usuario = usuariosEscolaCache.find(item => item.auth_user_id === authUserId);
+    const tenantGerenciado = obterTenantGerenciadoUsuarios();
+    if (usuarioLogado?.origem === 'LOCAL') {
+        mostrarToast('No modo local esta tela serve para pré-visualização. Atualize usuários na versão online.', 'warning');
+        return;
+    }
     if (!usuario) {
         mostrarToast('Usuário não encontrado na lista atual.', 'warning');
         return;
@@ -2395,7 +2682,8 @@ async function alternarStatusUsuarioAdmin(authUserId, novoStatus) {
                 role: usuario.role || ROLES.ADMIN,
                 shift: usuario.shift || null,
                 is_active: novoStatus,
-                password: ''
+                password: '',
+                tenantId: tenantGerenciado?.id || null
             }
         });
         mostrarToast(`Usuário ${novoStatus ? 'ativado' : 'desativado'} com sucesso.`);
@@ -2407,6 +2695,11 @@ async function alternarStatusUsuarioAdmin(authUserId, novoStatus) {
 
 async function salvarUsuarioAdmin(e) {
     e.preventDefault();
+    const tenantGerenciado = obterTenantGerenciadoUsuarios();
+    if (usuarioLogado?.origem === 'LOCAL') {
+        mostrarToast('No modo local esta tela serve para pré-visualização. O cadastro real de usuários funciona pela versão online.', 'warning');
+        return;
+    }
     const authUserId = document.getElementById('usuarioAdminAuthId')?.value || '';
     const name = (document.getElementById('usuarioAdminNome')?.value || '').trim();
     const email = (document.getElementById('usuarioAdminEmail')?.value || '').trim().toLowerCase();
@@ -2418,6 +2711,10 @@ async function salvarUsuarioAdmin(e) {
 
     if (!name || !email) {
         mostrarToast('Informe nome e e-mail do usuário.', 'warning');
+        return;
+    }
+    if (!tenantGerenciado) {
+        mostrarToast('Selecione uma escola antes de salvar usuários.', 'warning');
         return;
     }
     if (!authUserId && password.length < 6) {
@@ -2439,7 +2736,8 @@ async function salvarUsuarioAdmin(e) {
                 role,
                 shift: role === ROLES.COORD_TURNO ? shift : null,
                 is_active: isActive,
-                password
+                password,
+                tenantId: tenantGerenciado.id
             }
         });
         limparFormularioUsuarioAdmin();
@@ -2540,6 +2838,36 @@ function preencherTabelaPendenciasDashboard(tbodyId, lista, vazioTexto, montarLi
 }
 
 function renderDashboardRapido() {
+    const resumoPendencias = document.getElementById('dashboardPendenciasResumo');
+    if (isSuperAdminUser()) {
+        const setText = (id, valor) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = String(valor);
+        };
+        setText('dashboardTotalAulas', 0);
+        setText('dashboardTotalProfessores', 0);
+        setText('dashboardTotalTurmas', 0);
+        setText('dashboardTotalCursos', 0);
+        setText('dashboardAulasSemProfessor', 0);
+        setText('dashboardConflitos', 0);
+        setText('dashboardTotalCoordenadores', 0);
+        preencherTabelaPendenciasDashboard('dashboardTurmasSemAula', [], 'Use a aba Escolas para cadastrar e acompanhar as unidades.', item => item);
+        preencherTabelaPendenciasDashboard('dashboardProfessoresSemAula', [], 'O superadministrador nao interfere nos horarios de cada escola.', item => item);
+        preencherTabelaPendenciasDashboard('dashboardProfessoresCoordenadores', [], 'Cada escola continua isolada dentro do seu proprio tenant.', item => item);
+        if (resumoPendencias) {
+            resumoPendencias.textContent = 'Acesse a aba Escolas para criar novas unidades e definir o administrador inicial de cada uma.';
+        }
+        if (chartDashboardTurnos) {
+            chartDashboardTurnos.destroy();
+            chartDashboardTurnos = null;
+        }
+        if (chartDashboardDias) {
+            chartDashboardDias.destroy();
+            chartDashboardDias = null;
+        }
+        return;
+    }
+
     const totalAulas = Array.isArray(aulas) ? aulas.length : 0;
     const totalProfessores = Array.isArray(professores) ? professores.length : 0;
     const totalTurmas = Array.isArray(turmas) ? turmas.length : 0;
@@ -2583,7 +2911,6 @@ function renderDashboardRapido() {
         'Nenhum coordenador de área cadastrado.',
         item => `<td>${item.nome}</td><td>${item.area}</td>`
     );
-    const resumoPendencias = document.getElementById('dashboardPendenciasResumo');
     if (resumoPendencias) {
         resumoPendencias.textContent = `${turmasSemAula.length} turma(s) sem aula e ${professoresSemAula.length} professor(es) sem carga no momento.`;
     }
@@ -10654,10 +10981,21 @@ async function inicializarAplicacao() {
     if (formUsuarioAdmin) {
         formUsuarioAdmin.addEventListener('submit', salvarUsuarioAdmin);
     }
+    const selectTenantUsuariosAdmin = document.getElementById('usuarioAdminTenantSelect');
+    if (selectTenantUsuariosAdmin) {
+        selectTenantUsuariosAdmin.addEventListener('change', () => {
+            tenantAdminSelecionadoId = selectTenantUsuariosAdmin.value || '';
+            carregarUsuariosEscola();
+        });
+    }
     const selectUsuarioRole = document.getElementById('usuarioAdminRole');
     if (selectUsuarioRole) {
         selectUsuarioRole.addEventListener('change', atualizarVisibilidadeTurnoUsuarioAdmin);
         atualizarVisibilidadeTurnoUsuarioAdmin();
+    }
+    const formTenantAdmin = document.getElementById('formTenantAdmin');
+    if (formTenantAdmin) {
+        formTenantAdmin.addEventListener('submit', salvarTenantAdmin);
     }
 
     const selCursoTurma = document.getElementById('cursoTurma');

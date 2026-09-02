@@ -110,14 +110,15 @@
 
     <div class="main-content">
         <nav class="sidebar">
-            <button class="menu-btn active" onclick="showSection('dashboard')">📊 Dashboard</button>
+            <button class="menu-btn active" id="btnMenuDashboard" onclick="showSection('dashboard')">📊 Dashboard</button>
+            <button class="menu-btn" id="btnMenuEscolas" onclick="showSection('escolas')">🏢 Escolas</button>
             <button class="menu-btn" id="btnMenuUsuarios" onclick="showSection('usuarios')">👥 Usuários</button>
-            <button class="menu-btn" onclick="showSection('professores')">👨‍🏫 Professores</button>
-            <button class="menu-btn" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
-            <button class="menu-btn" onclick="showSection('horarios')">📅 Editor de Horários</button>
-            <button class="menu-btn" onclick="showSection('relatorios')">📄 Horários</button>
-            <button class="menu-btn" onclick="showSection('consultas')">🔎 Consultas</button>
-            <button class="menu-btn" onclick="sairSistema()">🚪 Sair</button>
+            <button class="menu-btn" id="btnMenuProfessores" onclick="showSection('professores')">👨‍🏫 Professores</button>
+            <button class="menu-btn" id="btnMenuTurmas" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
+            <button class="menu-btn" id="btnMenuHorarios" onclick="showSection('horarios')">📅 Editor de Horários</button>
+            <button class="menu-btn" id="btnMenuRelatorios" onclick="showSection('relatorios')">📄 Horários</button>
+            <button class="menu-btn" id="btnMenuConsultas" onclick="showSection('consultas')">🔎 Consultas</button>
+            <button class="menu-btn" id="btnMenuSair" onclick="sairSistema()">🚪 Sair</button>
         </nav>
 
         <main class="content">
@@ -211,9 +212,91 @@
                 </div>
             </section>
 
+            <!-- ================= ESCOLAS ================= -->
+            <section id="escolas" class="section">
+                <h2>Configuração Global</h2>
+
+                <div class="card">
+                    <h3>Cadastrar Nova Escola</h3>
+                    <p class="hint" id="tenantsAdminHint">
+                        Crie a escola e o primeiro administrador responsável por gerenciar os horários dessa unidade.
+                    </p>
+                    <form id="formTenantAdmin" class="form-grid">
+                        <div class="form-group">
+                            <label for="tenantAdminCode">Código da escola</label>
+                            <input type="text" id="tenantAdminCode" placeholder="Ex.: ESC003" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tenantAdminName">Nome da escola</label>
+                            <input type="text" id="tenantAdminName" placeholder="Ex.: Escola Técnica 003" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tenantAdminUserName">Nome do administrador</label>
+                            <input type="text" id="tenantAdminUserName" placeholder="Nome completo" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tenantAdminUserEmail">E-mail do administrador</label>
+                            <input type="email" id="tenantAdminUserEmail" placeholder="admin@escola.com" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="tenantAdminUserLogin">Login interno</label>
+                            <input type="text" id="tenantAdminUserLogin" placeholder="Ex.: admin.escola3">
+                        </div>
+                        <div class="form-group">
+                            <label for="tenantAdminUserPassword">Senha inicial</label>
+                            <input type="password" id="tenantAdminUserPassword" placeholder="Mínimo de 6 caracteres" required>
+                        </div>
+                        <div class="form-group full-row">
+                            <div class="inline-group">
+                                <button type="submit" class="btn-primary">🏫 Criar Escola</button>
+                                <button type="button" class="btn-secondary" onclick="limparFormularioTenantAdmin()">Limpar</button>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+
+                <div class="card">
+                    <div class="card-header-inline">
+                        <h3>Escolas Cadastradas</h3>
+                        <button type="button" class="btn-secondary small" onclick="carregarTenantsAdmin(true)">Atualizar</button>
+                    </div>
+                    <div class="table-wrapper">
+                        <table class="tabela-padrao">
+                            <thead>
+                            <tr>
+                                <th>Código</th>
+                                <th>Nome</th>
+                                <th>Criada em</th>
+                                <th>Ações</th>
+                            </tr>
+                            </thead>
+                            <tbody id="listaTenantsAdmin"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
             <!-- ================= USUÁRIOS ================= -->
             <section id="usuarios" class="section">
                 <h2>Usuários da Escola</h2>
+
+                <div class="card" id="usuariosTenantCard" style="display:none;">
+                    <div class="card-header-inline">
+                        <h3>Escola em Gerenciamento</h3>
+                        <button type="button" class="btn-secondary small" onclick="carregarTenantsAdmin(true)">Atualizar escolas</button>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="usuarioAdminTenantSelect">Selecione a escola</label>
+                            <select id="usuarioAdminTenantSelect"></select>
+                        </div>
+                        <div class="form-group full-row">
+                            <p class="hint" id="usuariosTenantHint">
+                                Escolha a escola que terá os usuários gerenciados nesta tela.
+                            </p>
+                        </div>
+                    </div>
+                </div>
 
                 <div class="card">
                     <h3>Cadastrar / Editar Usuário</h3>
