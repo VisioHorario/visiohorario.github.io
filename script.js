@@ -1798,10 +1798,15 @@ function autenticarUsuario(codigoEscola, login, senha) {
     if (!AUTH_LOCAL_HABILITADA) return null;
     const tenant = obterTenantPorCodigo(codigoEscola);
     if (!tenant) return null;
-    const usuario = USUARIOS_FIXOS.find(
+    const usuarioBase = USUARIOS_FIXOS.find(
         u => u.tenantId === tenant.id && u.login === login && u.senha === senha
     ) || null;
-    if (!usuario) return null;
+    if (!usuarioBase) return null;
+    const usuario = {
+        ...usuarioBase,
+        origem: 'LOCAL',
+        turno: null
+    };
     return { usuario, tenant };
 }
 
@@ -1929,10 +1934,10 @@ function usuarioTemAcessoCompleto() {
 function usuarioPodeGerirUsuarios() {
     return Boolean(
         usuarioLogado
-        && usuarioLogado.origem === 'SUPABASE'
         && usuarioLogado.role === ROLES.ADMIN
         && tenantAtual
         && tenantAtual.id
+        && (usuarioLogado.origem === 'SUPABASE' || usuarioLogado.origem === 'LOCAL')
     );
 }
 
@@ -10603,7 +10608,11 @@ async function inicializarAplicacao() {
                         const match = USUARIOS_FIXOS.find(x => x.id === u.id && (!u.tenantId || x.tenantId === u.tenantId));
                         if (match) {
                             const tenantMatch = TENANTS_FIXOS.find(t => t.id === match.tenantId) || null;
-                            usuarioLogado = match;
+                            usuarioLogado = {
+                                ...match,
+                                origem: 'LOCAL',
+                                turno: null
+                            };
                             tenantAtual = tenantMatch;
                             sessaoRestaurada = true;
                         }
