@@ -66,6 +66,21 @@ html.qr-boot #relatorioQrBody {
     display: grid !important;
 }
 
+html.qr-boot #relatorios > h2,
+html.qr-boot #cardRelatorioQr .card-header-inline {
+    display: none !important;
+}
+
+html.qr-boot #cardRelatorioQr {
+    margin-top: 0;
+}
+
+html.qr-boot-prof #qrTurmaGroup,
+html.qr-boot-turma #qrProfGroup,
+html.qr-boot #qrOpcoesGroup {
+    display: none !important;
+}
+
 .container {
     width: 100%;
     max-width: 100%;

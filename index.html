@@ -30,8 +30,14 @@
                 || params.has('t')
                 || params.get('alvo') === 'prof'
                 || params.get('alvo') === 'turma';
+            var alvo = params.get('alvo') || (params.has('p') ? 'prof' : (params.has('t') ? 'turma' : ''));
             if (modoQr) {
                 document.documentElement.classList.add('qr-boot');
+                if (alvo === 'prof') {
+                    document.documentElement.classList.add('qr-boot-prof');
+                } else if (alvo === 'turma') {
+                    document.documentElement.classList.add('qr-boot-turma');
+                }
             }
         })();
     </script>

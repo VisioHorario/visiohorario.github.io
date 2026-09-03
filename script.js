@@ -6942,6 +6942,12 @@ function aplicarModoQrRestrito() {
     if (!QRCODE_MODO_RESTRITO.ativo) return;
 
     document.documentElement.classList.add('qr-boot');
+    document.documentElement.classList.remove('qr-boot-prof', 'qr-boot-turma');
+    if (QRCODE_MODO_RESTRITO.alvo === 'prof') {
+        document.documentElement.classList.add('qr-boot-prof');
+    } else if (QRCODE_MODO_RESTRITO.alvo === 'turma') {
+        document.documentElement.classList.add('qr-boot-turma');
+    }
 
     const loginCard = document.getElementById('loginCard');
     if (loginCard) {
@@ -7097,7 +7103,7 @@ function aplicarSelecaoQrAutomatica() {
 
 document.addEventListener('DOMContentLoaded', async () => {
     if (!QRCODE_MODO_RESTRITO.ativo) {
-        document.documentElement.classList.remove('qr-boot');
+        document.documentElement.classList.remove('qr-boot', 'qr-boot-prof', 'qr-boot-turma');
     }
     aplicarModoQrRestrito();
 });
