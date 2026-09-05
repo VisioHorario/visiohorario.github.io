@@ -86,14 +86,16 @@
                         Organize professores, turmas e turnos em poucos cliques.
                     </text>
                 </svg>
-                <div class="floating-theme-toggle">
-                    <label class="theme-toggle" for="toggleTemaEscuro" title="Alternar tema claro/escuro" aria-label="Alternar tema claro ou escuro">
-                        <input type="checkbox" id="toggleTemaEscuro">
-                        <span class="theme-toggle-icon theme-toggle-icon-sun" aria-hidden="true">☀</span>
-                        <span class="theme-toggle-slider"></span>
-                        <span class="theme-toggle-icon theme-toggle-icon-moon" aria-hidden="true">🌙</span>
-                        <span class="theme-toggle-label" id="toggleTemaLabel">Tema claro</span>
-                    </label>
+                <div class="header-controls">
+                    <div class="floating-theme-toggle">
+                        <label class="theme-toggle" for="toggleTemaEscuro" title="Alternar tema claro/escuro" aria-label="Alternar tema claro ou escuro">
+                            <input type="checkbox" id="toggleTemaEscuro">
+                            <span class="theme-toggle-icon theme-toggle-icon-sun" aria-hidden="true">☀</span>
+                            <span class="theme-toggle-slider"></span>
+                            <span class="theme-toggle-icon theme-toggle-icon-moon" aria-hidden="true">🌙</span>
+                            <span class="theme-toggle-label" id="toggleTemaLabel">Tema claro</span>
+                        </label>
+                    </div>
                 </div>
             </div>
         </div>
@@ -132,20 +134,32 @@
         <nav class="sidebar">
             <button class="menu-btn active" id="btnMenuDashboard" onclick="showSection('dashboard')">📊 Dashboard</button>
             <button class="menu-btn" id="btnMenuEscolas" onclick="showSection('escolas')">🏢 Escolas</button>
-            <button class="menu-btn" id="btnMenuUsuarios" onclick="showSection('usuarios')">👥 Usuários</button>
             <button class="menu-btn" id="btnMenuProfessores" onclick="showSection('professores')">👨‍🏫 Professores</button>
             <button class="menu-btn" id="btnMenuTurmas" onclick="showSection('turmas')">🏫 Turmas / Cursos</button>
             <button class="menu-btn" id="btnMenuHorarios" onclick="showSection('horarios')">📅 Editor de Horários</button>
             <button class="menu-btn" id="btnMenuRelatorios" onclick="showSection('relatorios')">📄 Horários</button>
-            <button class="menu-btn" id="btnMenuConsultas" onclick="showSection('consultas')">🔎 Consultas</button>
-            <button class="menu-btn" id="btnMenuSair" onclick="sairSistema()">🚪 Sair</button>
+            <div class="sidebar-options-menu header-options-menu" id="headerOptionsMenu">
+                <button type="button" class="menu-btn sidebar-options-trigger" id="btnHeaderOptions" onclick="toggleHeaderOptionsMenu(event)" aria-expanded="false" aria-controls="headerOptionsDropdown" title="Abrir opções">
+                    ⚙️ Opções
+                </button>
+                <div class="header-options-dropdown sidebar-options-dropdown" id="headerOptionsDropdown">
+                    <button type="button" class="header-options-item" id="btnHeaderConsultas" onclick="abrirConsultasPeloMenu()">🔎 Consultas</button>
+                    <button type="button" class="header-options-item" id="btnHeaderUsuarios" onclick="abrirUsuariosPeloMenu()">👥 Usuários</button>
+                    <button type="button" class="header-options-item header-options-item--danger" id="btnHeaderSair" onclick="sairSistema()">🚪 Sair</button>
+                </div>
+            </div>
         </nav>
 
         <main class="content">
             <section id="dashboard" class="section active">
                 <div class="card">
                     <div class="dashboard-top">
-                        <h3>Visão Geral</h3>
+                        <div>
+                            <h3>Visão Geral</h3>
+                            <p class="dashboard-executive-summary" id="dashboardResumoExecutivo">
+                                Acompanhe rapidamente a cobertura da grade, conflitos e pendências críticas da escola.
+                            </p>
+                        </div>
                     </div>
                     <div class="dashboard-kpis">
                         <div class="dashboard-kpi kpi-aulas">
@@ -153,28 +167,35 @@
                             <strong class="kpi-value" id="dashboardTotalAulas">0</strong>
                         </div>
                         <div class="dashboard-kpi kpi-professores">
-                            <span class="kpi-label">Professores</span>
-                            <strong class="kpi-value" id="dashboardTotalProfessores">0</strong>
+                            <span class="kpi-label">Professores com carga</span>
+                            <strong class="kpi-value" id="dashboardProfessoresComCarga">0</strong>
+                            <span class="kpi-meta" id="dashboardProfessoresComCargaMeta">0 sem carga</span>
                         </div>
                         <div class="dashboard-kpi kpi-turmas">
                             <span class="kpi-label">Turmas</span>
                             <strong class="kpi-value" id="dashboardTotalTurmas">0</strong>
                         </div>
-                        <div class="dashboard-kpi kpi-cursos">
-                            <span class="kpi-label">Cursos / Áreas</span>
-                            <strong class="kpi-value" id="dashboardTotalCursos">0</strong>
+                        <div class="dashboard-kpi kpi-cobertura">
+                            <span class="kpi-label">Cobertura da grade</span>
+                            <strong class="kpi-value" id="dashboardCoberturaGrade">0%</strong>
+                            <span class="kpi-meta" id="dashboardCoberturaMeta">0 de 0 turmas atendidas</span>
+                            <div class="dashboard-progress" aria-hidden="true">
+                                <span id="dashboardCoberturaBar"></span>
+                            </div>
+                        </div>
+                        <div class="dashboard-kpi kpi-atendidas">
+                            <span class="kpi-label">Turmas atendidas</span>
+                            <strong class="kpi-value" id="dashboardTurmasAtendidas">0</strong>
+                            <span class="kpi-meta" id="dashboardTurmasAtendidasMeta">0 sem aula lançada</span>
                         </div>
                         <div class="dashboard-kpi kpi-sem-prof">
                             <span class="kpi-label">Aulas sem professor</span>
                             <strong class="kpi-value" id="dashboardAulasSemProfessor">0</strong>
                         </div>
                         <div class="dashboard-kpi kpi-conflitos">
-                            <span class="kpi-label">Possíveis conflitos</span>
+                            <span class="kpi-label">Conflitos principais</span>
                             <strong class="kpi-value" id="dashboardConflitos">0</strong>
-                        </div>
-                        <div class="dashboard-kpi kpi-coordenadores">
-                            <span class="kpi-label">Coordenadores de área/Laboratório</span>
-                            <strong class="kpi-value" id="dashboardTotalCoordenadores">0</strong>
+                            <span class="kpi-meta" id="dashboardConflitosMeta">Nenhum conflito detectado</span>
                         </div>
                     </div>
                 </div>
@@ -189,7 +210,7 @@
                     </div>
                 </div>
                 <div class="card">
-                    <h3>Pendências de lançamento</h3>
+                    <h3>Alertas e Pendências</h3>
                     <p class="hint" id="dashboardPendenciasResumo"></p>
                     <div class="dashboard-lists">
                         <div>
@@ -217,15 +238,16 @@
                             </table>
                         </div>
                         <div>
-                            <h4>Professores coordenadores</h4>
+                            <h4>Conflitos principais</h4>
                             <table class="tabela-padrao">
                                 <thead>
                                 <tr>
-                                    <th>Professor</th>
-                                    <th>Área / Curso / Laboratório</th>
+                                    <th>Tipo</th>
+                                    <th>Referência</th>
+                                    <th>Horário</th>
                                 </tr>
                                 </thead>
-                                <tbody id="dashboardProfessoresCoordenadores"></tbody>
+                                <tbody id="dashboardConflitosPrincipais"></tbody>
                             </table>
                         </div>
                     </div>
@@ -745,7 +767,6 @@
                         <button type="button" class="btn-warning" onclick="exportarBackup()">💾 Exportar Dados</button>
                         <input type="file" id="importBackup" accept=".json" style="display: none;" onchange="importarBackup(event)">
                         <button type="button" class="btn-secondary" onclick="document.getElementById('importBackup').click()">📂 Importar Dados</button>
-                        <button type="button" class="btn-secondary" id="btnRestaurarNuvem" onclick="restaurarDoPostgres()">🗄️ Restaurar da Nuvem</button>
                         <button type="button" class="btn-secondary" id="btnToggleInsercaoRapida" onclick="toggleInsercaoRapida()">
                             💡 Inserção rápida
                         </button>

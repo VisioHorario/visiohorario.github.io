@@ -167,6 +167,36 @@ let chartProfDiasMes = null;
 let chartDashboardTurnos = null;
 let chartDashboardDias = null;
 
+const chartDashboardValueLabels = {
+    id: 'chartDashboardValueLabels',
+    afterDatasetsDraw(chart) {
+        const { ctx } = chart;
+        chart.data.datasets.forEach((dataset, datasetIndex) => {
+            const meta = chart.getDatasetMeta(datasetIndex);
+            if (!meta || meta.hidden) return;
+            meta.data.forEach((element, index) => {
+                const valor = dataset.data[index];
+                if (valor == null) return;
+                const props = element.getProps(['x', 'y', 'base'], true);
+                const x = props.x;
+                const y = props.y;
+                const base = props.base;
+                const alturaBarra = Math.abs(base - y);
+                ctx.save();
+                ctx.fillStyle = '#ffffff';
+                ctx.font = '700 12px Poppins, Segoe UI, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = alturaBarra > 26 ? 'middle' : 'bottom';
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+                ctx.shadowBlur = 4;
+                const posY = alturaBarra > 26 ? y + (base - y) / 2 : y - 8;
+                ctx.fillText(String(valor), x, posY);
+                ctx.restore();
+            });
+        });
+    }
+};
+
 const PALETA_GRAFICOS = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#e67e22'];
 
 const PARAMS_INICIAIS = new URLSearchParams(window.location.search || '');
@@ -2002,11 +2032,14 @@ function escapeHtml(valor) {
 function aplicarPermissoesNaUI() {
     const btnEscolas = document.getElementById('btnMenuEscolas');
     const btnUsuarios = document.getElementById('btnMenuUsuarios');
+    const btnHeaderOptions = document.getElementById('btnHeaderOptions');
+    const btnHeaderConsultas = document.getElementById('btnHeaderConsultas');
+    const btnHeaderUsuarios = document.getElementById('btnHeaderUsuarios');
+    const btnHeaderSair = document.getElementById('btnHeaderSair');
     const btnProfessores = document.getElementById('btnMenuProfessores');
     const btnTurmas = document.getElementById('btnMenuTurmas');
     const btnHorarios = document.getElementById('btnMenuHorarios');
     const btnRelatorios = document.getElementById('btnMenuRelatorios');
-    const btnConsultas = document.getElementById('btnMenuConsultas');
     const usuariosTenantCard = document.getElementById('usuariosTenantCard');
     const blocoTempoVago = document.getElementById('profRelatorioMostrarVagos')?.closest('.form-group');
     const blocoGraficos = document.getElementById('profRelatorioMostrarGraficos')?.closest('.form-group');
@@ -2020,11 +2053,14 @@ function aplicarPermissoesNaUI() {
     if (!usuarioLogado) {
         if (btnEscolas) btnEscolas.style.display = 'none';
         if (btnUsuarios) btnUsuarios.style.display = 'none';
+        if (btnHeaderOptions) btnHeaderOptions.style.display = 'none';
+        if (btnHeaderConsultas) btnHeaderConsultas.style.display = 'none';
+        if (btnHeaderUsuarios) btnHeaderUsuarios.style.display = 'none';
+        if (btnHeaderSair) btnHeaderSair.style.display = 'none';
         if (btnProfessores) btnProfessores.style.display = 'none';
         if (btnTurmas) btnTurmas.style.display = 'none';
         if (btnHorarios) btnHorarios.style.display = 'none';
         if (btnRelatorios) btnRelatorios.style.display = 'none';
-        if (btnConsultas) btnConsultas.style.display = 'none';
         if (blocoTempoVago) blocoTempoVago.style.display = 'none';
         if (blocoGraficos) blocoGraficos.style.display = 'none';
         if (charts) charts.style.display = 'none';
@@ -2038,6 +2074,12 @@ function aplicarPermissoesNaUI() {
     if (btnUsuarios) {
         btnUsuarios.style.display = usuarioPodeGerirUsuarios() ? '' : 'none';
     }
+    if (btnHeaderOptions) {
+        btnHeaderOptions.style.display = '';
+    }
+    if (btnHeaderUsuarios) {
+        btnHeaderUsuarios.style.display = usuarioPodeGerirUsuarios() ? '' : 'none';
+    }
     if (usuariosTenantCard) {
         usuariosTenantCard.style.display = usuarioPodeGerirEscolas() ? '' : 'none';
     }
@@ -2047,13 +2089,14 @@ function aplicarPermissoesNaUI() {
         if (btnTurmas) btnTurmas.style.display = 'none';
         if (btnHorarios) btnHorarios.style.display = 'none';
         if (btnRelatorios) btnRelatorios.style.display = 'none';
-        if (btnConsultas) btnConsultas.style.display = 'none';
+        if (btnHeaderConsultas) btnHeaderConsultas.style.display = 'none';
         if (blocoTempoVago) blocoTempoVago.style.display = 'none';
         if (blocoGraficos) blocoGraficos.style.display = 'none';
         if (charts) charts.style.display = 'none';
         if (blocoUsarIa) blocoUsarIa.style.display = 'none';
         if (chkUsarIa) chkUsarIa.checked = false;
         if (btnRestaurarNuvem) btnRestaurarNuvem.style.display = 'none';
+        if (btnHeaderSair) btnHeaderSair.style.display = '';
         return;
     }
 
@@ -2062,6 +2105,7 @@ function aplicarPermissoesNaUI() {
     if (btnHorarios) btnHorarios.style.display = '';
     if (btnRelatorios) btnRelatorios.style.display = '';
     const acessoCompleto = usuarioTemAcessoCompleto();
+    const podeVisualizarRestaurarNuvem = acessoCompleto || usuarioLogado?.origem === 'LOCAL';
     if (blocoUsarIa) {
         blocoUsarIa.style.display = acessoCompleto ? '' : 'none';
     }
@@ -2069,10 +2113,13 @@ function aplicarPermissoesNaUI() {
         chkUsarIa.checked = false;
     }
     if (btnRestaurarNuvem) {
-        btnRestaurarNuvem.style.display = acessoCompleto ? '' : 'none';
+        btnRestaurarNuvem.style.display = 'none';
+    }
+    if (btnHeaderSair) {
+        btnHeaderSair.style.display = '';
     }
     if (usuarioLogado.role === ROLES.ADMIN) {
-        if (btnConsultas) btnConsultas.style.display = '';
+        if (btnHeaderConsultas) btnHeaderConsultas.style.display = '';
         if (blocoTempoVago) blocoTempoVago.style.display = '';
         if (blocoGraficos) blocoGraficos.style.display = '';
         if (charts) charts.style.display = '';
@@ -2084,7 +2131,7 @@ function aplicarPermissoesNaUI() {
         }
         return;
     }
-    if (btnConsultas) btnConsultas.style.display = 'none';
+    if (btnHeaderConsultas) btnHeaderConsultas.style.display = 'none';
     if (blocoTempoVago) blocoTempoVago.style.display = 'none';
     if (blocoGraficos) blocoGraficos.style.display = 'none';
     if (charts) charts.style.display = 'none';
@@ -2098,6 +2145,40 @@ function aplicarPermissoesNaUI() {
             turnoRelCurso.disabled = true;
         }
     }
+}
+
+function fecharHeaderOptionsMenu() {
+    const menu = document.getElementById('headerOptionsMenu');
+    const btn = document.getElementById('btnHeaderOptions');
+    if (menu) {
+        menu.classList.remove('open');
+    }
+    if (btn) {
+        btn.setAttribute('aria-expanded', 'false');
+    }
+}
+
+function toggleHeaderOptionsMenu(event) {
+    if (event) {
+        event.preventDefault();
+        event.stopPropagation();
+    }
+    const menu = document.getElementById('headerOptionsMenu');
+    const btn = document.getElementById('btnHeaderOptions');
+    if (!menu || !btn) return;
+    const abrir = !menu.classList.contains('open');
+    menu.classList.toggle('open', abrir);
+    btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+}
+
+function abrirUsuariosPeloMenu() {
+    fecharHeaderOptionsMenu();
+    showSection('usuarios');
+}
+
+function abrirConsultasPeloMenu() {
+    fecharHeaderOptionsMenu();
+    showSection('consultas');
 }
 
 function mostrarHintEditorTurno() {
@@ -2180,6 +2261,7 @@ function limparSessaoNavegador() {
 }
 
 function sairSistema() {
+    fecharHeaderOptionsMenu();
     if (SUPABASE_ATIVO && supabaseClient) {
         supabaseClient.auth.signOut().catch(() => {});
     }
@@ -2241,6 +2323,7 @@ function carregarDadosTenantAtual() {
 }
 
 function showSection(id) {
+    fecharHeaderOptionsMenu();
     if (QRCODE_MODO_RESTRITO.ativo && id !== 'relatorios') {
         return;
     }
@@ -2259,6 +2342,9 @@ function showSection(id) {
     const alvo = Array.from(document.querySelectorAll('.menu-btn'))
         .find(b => b.getAttribute('onclick')?.includes(`'${id}'`));
     if (alvo) alvo.classList.add('active');
+    if (!alvo && id === 'consultas') {
+        document.getElementById('btnHeaderOptions')?.classList.add('active');
+    }
     
     // Atualiza selects específicos quando a seção é aberta
     if (id === 'relatorios') {
@@ -2830,13 +2916,77 @@ function listarCoordenadoresArea(limite = 8) {
         }));
 }
 
+function listarConflitosDashboard(limite = 8) {
+    const conflitos = [];
+    const conflitosProfessorMap = new Map();
+    const mapaTurmas = new Map((turmas || []).map(t => [t.id, t]));
+
+    (aulas || []).forEach(aula => {
+        if (!aula || !aula.professorId || !aula.turno || !aula.dia || !aula.tempoId) return;
+        const chave = `${aula.professorId}|${aula.turno}|${aula.dia}|${aula.tempoId}`;
+        if (!conflitosProfessorMap.has(chave)) {
+            conflitosProfessorMap.set(chave, []);
+        }
+        conflitosProfessorMap.get(chave).push(aula);
+    });
+
+    conflitosProfessorMap.forEach(lista => {
+        if (lista.length < 2) return;
+        const aulaBase = lista[0];
+        const professor = professores.find(p => p.id === aulaBase.professorId);
+        const tempo = getTempos(aulaBase.turno).find(t => t.id === aulaBase.tempoId);
+        const turmasNomes = lista
+            .map(a => mapaTurmas.get(a.turmaId)?.nome || a.turmaId || 'Turma')
+            .filter(Boolean)
+            .join(', ');
+        conflitos.push({
+            prioridade: 1,
+            tipo: 'Professor',
+            referencia: professor?.nome || 'Professor não identificado',
+            horario: `${textoDia(aulaBase.dia)} • ${textoTurno(aulaBase.turno)} • ${tempo?.etiqueta || `Tempo ${aulaBase.tempoId}`}`,
+            detalhe: turmasNomes
+        });
+    });
+
+    (aulas || []).forEach(aula => {
+        if (!aula || !aula.turno || !aula.dia || !aula.tempoId) return;
+        const tempo = getTempos(aula.turno).find(t => t.id === aula.tempoId);
+        const turma = mapaTurmas.get(aula.turmaId);
+        if (!tempo) {
+            conflitos.push({
+                prioridade: 2,
+                tipo: 'Tempo',
+                referencia: turma?.nome || aula.turmaId || 'Turma não identificada',
+                horario: `${textoDia(aula.dia)} • ${textoTurno(aula.turno)} • Tempo ${aula.tempoId}`,
+                detalhe: 'Tempo inexistente na configuração'
+            });
+            return;
+        }
+
+        const professor = aula.professorId ? professores.find(p => p.id === aula.professorId) : null;
+        if (professor && !professorDisponivelNoHorario(professor, aula.turno, aula.dia, aula.tempoId)) {
+            conflitos.push({
+                prioridade: 3,
+                tipo: 'Disponibilidade',
+                referencia: professor.nome || 'Professor não identificado',
+                horario: `${textoDia(aula.dia)} • ${textoTurno(aula.turno)} • ${tempo.etiqueta}`,
+                detalhe: turma?.nome || aula.turmaId || 'Turma não identificada'
+            });
+        }
+    });
+
+    return conflitos
+        .sort((a, b) => a.prioridade - b.prioridade || (a.referencia || '').localeCompare(b.referencia || '', 'pt-BR', { sensitivity: 'base' }))
+        .slice(0, limite);
+}
+
 function preencherTabelaPendenciasDashboard(tbodyId, lista, vazioTexto, montarLinha) {
     const tbody = document.getElementById(tbodyId);
     if (!tbody) return;
     tbody.innerHTML = '';
     if (!lista.length) {
         const tr = document.createElement('tr');
-        tr.innerHTML = `<td colspan="2">${vazioTexto}</td>`;
+        tr.innerHTML = `<td colspan="${tbody.dataset.colspan || 2}">${vazioTexto}</td>`;
         tbody.appendChild(tr);
         return;
     }
@@ -2849,23 +2999,33 @@ function preencherTabelaPendenciasDashboard(tbodyId, lista, vazioTexto, montarLi
 
 function renderDashboardRapido() {
     const resumoPendencias = document.getElementById('dashboardPendenciasResumo');
+    const resumoExecutivo = document.getElementById('dashboardResumoExecutivo');
     if (isSuperAdminUser()) {
         const setText = (id, valor) => {
             const el = document.getElementById(id);
             if (el) el.textContent = String(valor);
         };
         setText('dashboardTotalAulas', 0);
-        setText('dashboardTotalProfessores', 0);
         setText('dashboardTotalTurmas', 0);
-        setText('dashboardTotalCursos', 0);
+        setText('dashboardProfessoresComCarga', 0);
+        setText('dashboardCoberturaGrade', '0%');
+        setText('dashboardTurmasAtendidas', 0);
         setText('dashboardAulasSemProfessor', 0);
         setText('dashboardConflitos', 0);
-        setText('dashboardTotalCoordenadores', 0);
+        setText('dashboardProfessoresComCargaMeta', '0 sem carga');
+        setText('dashboardCoberturaMeta', '0 de 0 turmas atendidas');
+        setText('dashboardTurmasAtendidasMeta', '0 sem aula lançada');
+        setText('dashboardConflitosMeta', 'Nenhum conflito detectado');
+        const barraCobertura = document.getElementById('dashboardCoberturaBar');
+        if (barraCobertura) barraCobertura.style.width = '0%';
         preencherTabelaPendenciasDashboard('dashboardTurmasSemAula', [], 'Use a aba Escolas para cadastrar e acompanhar as unidades.', item => item);
         preencherTabelaPendenciasDashboard('dashboardProfessoresSemAula', [], 'O superadministrador nao interfere nos horarios de cada escola.', item => item);
-        preencherTabelaPendenciasDashboard('dashboardProfessoresCoordenadores', [], 'Cada escola continua isolada dentro do seu proprio tenant.', item => item);
+        preencherTabelaPendenciasDashboard('dashboardConflitosPrincipais', [], 'Cada escola continua isolada dentro do seu proprio tenant.', item => item);
         if (resumoPendencias) {
             resumoPendencias.textContent = 'Acesse a aba Escolas para criar novas unidades e definir o administrador inicial de cada uma.';
+        }
+        if (resumoExecutivo) {
+            resumoExecutivo.textContent = 'Visão global desabilitada para o superadministrador. Cada escola mantém seus indicadores e pendências dentro do próprio tenant.';
         }
         if (chartDashboardTurnos) {
             chartDashboardTurnos.destroy();
@@ -2881,27 +3041,36 @@ function renderDashboardRapido() {
     const totalAulas = Array.isArray(aulas) ? aulas.length : 0;
     const totalProfessores = Array.isArray(professores) ? professores.length : 0;
     const totalTurmas = Array.isArray(turmas) ? turmas.length : 0;
-    const totalCursos = Array.isArray(cursos) ? cursos.filter(c => c !== CURSO_TEMPO_INTEGRAL).length : 0;
-    const totalCoordenadores = (professores || []).filter(p => p.coordenadorArea).length;
     const aulasSemProfessor = (aulas || []).filter(a => !a.professorId).length;
     const conflitos = calcularConflitosRapidos();
     const turnos = contarAulasPorTurno();
     const dias = contarAulasPorDia();
     const turmasSemAula = listarTurmasSemAula(8);
     const professoresSemAula = listarProfessoresSemAula(8);
-    const coordenadoresArea = listarCoordenadoresArea(8);
+    const conflitosPrincipais = listarConflitosDashboard(8);
+    const professoresComCarga = Math.max(totalProfessores - professoresSemAula.length, 0);
+    const turmasAtendidas = Math.max(totalTurmas - turmasSemAula.length, 0);
+    const coberturaGrade = totalTurmas > 0 ? Math.round((turmasAtendidas / totalTurmas) * 100) : 0;
+    const barraCobertura = document.getElementById('dashboardCoberturaBar');
 
     const setText = (id, valor) => {
         const el = document.getElementById(id);
         if (el) el.textContent = String(valor);
     };
     setText('dashboardTotalAulas', totalAulas);
-    setText('dashboardTotalProfessores', totalProfessores);
     setText('dashboardTotalTurmas', totalTurmas);
-    setText('dashboardTotalCursos', totalCursos);
+    setText('dashboardProfessoresComCarga', professoresComCarga);
+    setText('dashboardCoberturaGrade', `${coberturaGrade}%`);
+    setText('dashboardTurmasAtendidas', turmasAtendidas);
     setText('dashboardAulasSemProfessor', aulasSemProfessor);
     setText('dashboardConflitos', conflitos);
-    setText('dashboardTotalCoordenadores', totalCoordenadores);
+    setText('dashboardProfessoresComCargaMeta', `${professoresSemAula.length} sem carga`);
+    setText('dashboardCoberturaMeta', `${turmasAtendidas} de ${totalTurmas} turmas atendidas`);
+    setText('dashboardTurmasAtendidasMeta', `${turmasSemAula.length} sem aula lançada`);
+    setText('dashboardConflitosMeta', conflitos ? `${conflitos} ponto(s) de atenção encontrado(s)` : 'Nenhum conflito detectado');
+    if (barraCobertura) {
+        barraCobertura.style.width = `${Math.max(0, Math.min(coberturaGrade, 100))}%`;
+    }
 
     preencherTabelaPendenciasDashboard(
         'dashboardTurmasSemAula',
@@ -2916,13 +3085,16 @@ function renderDashboardRapido() {
         item => `<td>${item.nome}</td><td>${item.base}</td>`
     );
     preencherTabelaPendenciasDashboard(
-        'dashboardProfessoresCoordenadores',
-        coordenadoresArea,
-        'Nenhum coordenador de área cadastrado.',
-        item => `<td>${item.nome}</td><td>${item.area}</td>`
+        'dashboardConflitosPrincipais',
+        conflitosPrincipais,
+        'Nenhum conflito crítico detectado no momento.',
+        item => `<td>${item.tipo}</td><td><strong>${item.referencia}</strong><br><span class="dashboard-table-detail">${item.detalhe}</span></td><td>${item.horario}</td>`
     );
     if (resumoPendencias) {
-        resumoPendencias.textContent = `${turmasSemAula.length} turma(s) sem aula e ${professoresSemAula.length} professor(es) sem carga no momento.`;
+        resumoPendencias.textContent = `${turmasSemAula.length} turma(s) sem aula, ${professoresSemAula.length} professor(es) sem carga e ${conflitosPrincipais.length} conflito(s) prioritário(s) exibido(s).`;
+    }
+    if (resumoExecutivo) {
+        resumoExecutivo.textContent = `Cobertura atual de ${coberturaGrade}% da grade, com ${turmasAtendidas} turma(s) atendida(s), ${aulasSemProfessor} aula(s) sem professor e ${conflitos} conflito(s) para revisar.`;
     }
 
     const canvasTurnos = document.getElementById('dashChartTurnos');
@@ -2942,9 +3114,13 @@ function renderDashboardRapido() {
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
-                plugins: { legend: { display: false } },
+                plugins: {
+                    legend: { display: false },
+                    chartDashboardValueLabels: {}
+                },
                 scales: { y: { beginAtZero: true, ticks: { precision: 0 } } }
-            }
+            },
+            plugins: [chartDashboardValueLabels]
         });
     }
 
@@ -2952,22 +3128,28 @@ function renderDashboardRapido() {
     if (canvasDias && typeof Chart !== 'undefined') {
         if (chartDashboardDias) chartDashboardDias.destroy();
         chartDashboardDias = new Chart(canvasDias, {
-            type: 'doughnut',
+            type: 'bar',
             data: {
                 labels: dias.map(i => i.dia),
                 datasets: [{
+                    label: 'Aulas',
                     data: dias.map(i => i.valor),
                     backgroundColor: ['#2f80ed', '#27ae60', '#f2c94c', '#eb5757', '#56ccf2', '#bb6bd9'],
-                    borderWidth: 1
+                    borderRadius: 8
                 }]
             },
             options: {
                 responsive: true,
                 maintainAspectRatio: false,
                 plugins: {
-                    legend: { position: 'bottom' }
+                    legend: { display: false },
+                    chartDashboardValueLabels: {}
+                },
+                scales: {
+                    y: { beginAtZero: true, ticks: { precision: 0 } }
                 }
-            }
+            },
+            plugins: [chartDashboardValueLabels]
         });
     }
 }
@@ -7106,6 +7288,20 @@ document.addEventListener('DOMContentLoaded', async () => {
         document.documentElement.classList.remove('qr-boot', 'qr-boot-prof', 'qr-boot-turma');
     }
     aplicarModoQrRestrito();
+    document.addEventListener('pointerdown', (event) => {
+        const menu = document.getElementById('headerOptionsMenu');
+        if (!menu) return;
+        const caminho = typeof event.composedPath === 'function' ? event.composedPath() : [];
+        const clicouDentro = caminho.includes(menu) || menu.contains(event.target);
+        if (!clicouDentro) {
+            fecharHeaderOptionsMenu();
+        }
+    }, true);
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            fecharHeaderOptionsMenu();
+        }
+    });
 });
 
 function copiarLinkQrProfessor() {
